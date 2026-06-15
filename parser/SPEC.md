@@ -1,6 +1,6 @@
 # Infracost Parser Plugin Specification
 
-This document defines the interface contract for Infracost parser plugins. A parser plugin teaches Infracost how to read a new Infrastructure-as-Code format (e.g., Pulumi, Crossplane, CDK for Terraform) and translate it into the cost-estimation tree that the Infracost providers consume.
+This document defines the interface contract for Infracost parser plugins. A parser plugin teaches Infracost how to read a new Infrastructure-as-Code format (e.g., Pulumi, Crossplane, CDK for Terraform) and translate it into the IaC-agnostic cost tree that the Infracost providers consume.
 
 ## Architecture Overview
 
@@ -8,118 +8,111 @@ This document defines the interface contract for Infracost parser plugins. A par
 infracost scan
     |
     v
-Plugin Manager (discovers per-IaC binaries in plugin directory)
+Plugin Manager (launches every binary in the plugin directory)
     |
     v
-For each project path:
-    1. Describe() — get plugin metadata (name, priority, extensions)
-    2. Detect()   — ask each plugin (by priority) if it handles this path
-    3. Initialize() — pass supported resource types
-    4. Parse() or ParseToTree() — extract resources from the IaC files
+GetPluginInfo()  — identify the plugin and its type (PARSER / PROVIDER)
     |
     v
-Provider plugins (AWS, Azure, GCP) price the extracted resources
+For each parser plugin (ordered by identification priority):
+    1. GetParserConfig()  — priority + project-type mapping
+    2. IdentifyProjects() — which paths in a directory this plugin parses
+    3. Parse()            — extract resources into an IaC-agnostic tree
+    |
+    v
+Provider plugins (AWS, Azure, GCP) price the tree
 ```
 
-Plugins are standalone binaries that communicate with the Infracost CLI over gRPC using the [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin) framework. The CLI spawns the plugin process, performs a handshake, and issues gRPC calls. When parsing is complete the plugin process exits.
+Plugins are standalone binaries that communicate with the Infracost CLI over gRPC using the [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin) framework. The CLI spawns the plugin process, performs a handshake, and issues gRPC calls. When work is complete the plugin process exits.
 
-## Plugin Naming
+Every plugin implements two gRPC services:
 
-Every plugin has a **canonical name** in `registry/namespace/name` format:
+- **`PluginService`** — a single `GetPluginInfo` RPC that reports the plugin's type and metadata. This is how the CLI tells parser plugins apart from provider plugins.
+- **`ParserService`** — the parsing RPCs (`GetParserConfig`, `IdentifyProjects`, `Parse`).
 
-```
-plugins.infracost.io/infracost/terraform
-plugins.infracost.io/acme/crossplane
-plugins.example.com/acme/pulumi
-```
+Both services are registered on the same gRPC server (see [Handshake](#go-plugin-handshake)).
 
-Resolution rules (short forms expand to the full canonical name):
-- `terraform` → `plugins.infracost.io/infracost/terraform` (official plugin, default registry)
-- `acme/crossplane` → `plugins.infracost.io/acme/crossplane` (community plugin, default registry)
-- `plugins.example.com/acme/pulumi` → as-is (custom registry, first segment contains a dot)
+## Plugin Identity and Naming
 
-The `infracost/` namespace is reserved for official plugins.
+The CLI **does not** infer a plugin's type or identity from its binary filename. It launches every executable in the plugin directory, calls `GetPluginInfo`, and uses the returned `type` to decide whether the binary is a parser or a provider. Binaries that fail to launch or handshake are skipped.
 
-The canonical name is returned by the `Describe` RPC and is the source of truth for plugin identity. It is used in dependency declarations (`requires`) and internal tracking.
+A descriptive binary name such as `infracost-parser-plugin-<format>` is conventional and recommended for clarity, but it is not required for discovery.
 
-## Binary Naming Convention
+The `name` returned by `GetPluginInfo` is the plugin's identity. By convention it is `<namespace>/<name>`:
 
-Plugin binaries **must** be named:
+- Official plugins use the `infracost/` namespace, e.g. `infracost/terraform`, `infracost/cloudformation`.
+- Community plugins should use their own namespace, e.g. `acme/crossplane`.
 
-```
-infracost-parser-plugin-<identifier>
-```
-
-For official plugins (in the `infracost/` namespace), the identifier is the short name:
-- `infracost-parser-plugin-terraform` (canonical: `plugins.infracost.io/infracost/terraform`)
-
-For community plugins, slashes in the namespace are replaced with double-dashes:
-- `infracost-parser-plugin-acme--crossplane` (canonical: `plugins.infracost.io/acme/crossplane`)
-
-Rules:
-- On Windows, the `.exe` extension is added automatically
-- Binaries ending in `-debug` are ignored (use this for debug builds)
-- The CLI discovers plugins by scanning the plugin directory for files matching this pattern
-- After discovery, the CLI calls `Describe` to get the canonical name — the binary filename is only for discovery
+Names must be unique across all installed plugins.
 
 ## go-plugin Handshake
 
-Every plugin must use this exact handshake configuration:
+All Infracost plugins — parser and provider alike — share one handshake. The type is resolved at runtime via `GetPluginInfo`, so there is a single magic cookie rather than a per-type one.
 
 ```go
-plugin.Serve(&plugin.ServeConfig{
-    HandshakeConfig: plugin.HandshakeConfig{
+const maxMessageSize = 64 * 1024 * 1024
+
+goplugin.Serve(&goplugin.ServeConfig{
+    HandshakeConfig: goplugin.HandshakeConfig{
         ProtocolVersion:  1,
-        MagicCookieKey:   "INFRACOST_PARSER_PLUGIN_MAGIC_COOKIE",
-        MagicCookieValue: "ac92b06c592f",
+        MagicCookieKey:   "INFRACOST_PLUGIN",
+        MagicCookieValue: "de8c7e96-497c-4168-80c4-fc875c8ce764",
     },
-    Plugins: map[string]plugin.Plugin{
-        "parser": yourPluginStruct,
+    Plugins: map[string]goplugin.Plugin{
+        // The dispense key is always "plugin".
+        "plugin": yourPluginStruct,
     },
     GRPCServer: func(opts []grpc.ServerOption) *grpc.Server {
         opts = append(opts,
-            grpc.MaxRecvMsgSize(64 * 1024 * 1024),
-            grpc.MaxSendMsgSize(64 * 1024 * 1024),
+            grpc.MaxRecvMsgSize(maxMessageSize),
+            grpc.MaxSendMsgSize(maxMessageSize),
         )
         return grpc.NewServer(opts...)
     },
 })
 ```
 
-The plugin struct must implement `plugin.GRPCPlugin`:
+The plugin struct must implement `plugin.GRPCPlugin` and register **both** services on the server:
 
 ```go
 type myPlugin struct {
-    plugin.NetRPCUnsupportedPlugin
+    goplugin.NetRPCUnsupportedPlugin
 }
 
-func (p *myPlugin) GRPCServer(_ *plugin.GRPCBroker, g *grpc.Server) error {
-    api.RegisterParserServiceServer(g, myServiceImplementation)
+func (p *myPlugin) GRPCServer(_ *goplugin.GRPCBroker, g *grpc.Server) error {
+    pluginpb.RegisterPluginServiceServer(g, myServiceImplementation)
+    pluginpb.RegisterParserServiceServer(g, myServiceImplementation)
     return nil
 }
 
-func (p *myPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
+func (p *myPlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
     return nil, fmt.Errorf("not implemented")
 }
 ```
 
+The generated Go bindings live in `github.com/infracost/proto/gen/go/infracost/plugin` (aliased `pluginpb` above). Embedding `pluginpb.UnimplementedPluginServiceServer` and `pluginpb.UnimplementedParserServiceServer` in your service struct keeps it forward-compatible if new RPCs are added.
+
 ## gRPC Service Contract
 
-Plugins implement the `ParserService` defined in `infracost/parser/api/service.proto`:
+Plugins implement `PluginService` and `ParserService`, both defined in the `infracost.plugin` package:
 
 ```protobuf
+// infracost/plugin/plugin.proto
+service PluginService {
+    rpc GetPluginInfo(GetPluginInfoRequest) returns (GetPluginInfoResponse);
+}
+
+// infracost/plugin/parser.proto
 service ParserService {
-    rpc Describe(DescribeRequest) returns (DescribeResponse);
-    rpc Detect(DetectRequest) returns (DetectResponse);
-    rpc Initialize(InitializeRequest) returns (InitializeResponse);
+    rpc GetParserConfig(GetParserConfigRequest) returns (GetParserConfigResponse);
+    rpc IdentifyProjects(IdentifyProjectsRequest) returns (IdentifyProjectsResponse);
     rpc Parse(ParseRequest) returns (ParseResponse);
-    rpc ParseToTree(ParseToTreeRequest) returns (ParseToTreeResponse);
 }
 ```
 
-### Describe
+### GetPluginInfo
 
-Returns static metadata about the plugin. Called once at startup when the CLI discovers the binary.
+Returns the plugin's type and static metadata. Called once at startup when the CLI discovers the binary.
 
 **Request:** Empty.
 
@@ -127,169 +120,135 @@ Returns static metadata about the plugin. Called once at startup when the CLI di
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Canonical plugin name in `registry/namespace/name` format, e.g. `"plugins.infracost.io/infracost/pulumi"`. Must be unique across all plugins. |
-| `display_name` | string | yes | Human-readable name, e.g. `"Pulumi"`. Shown in CLI output. |
-| `priority` | int32 | yes | Detection order. Lower = checked first. See [Priority](#priority). |
-| `file_extensions` | string[] | yes | Extensions this plugin may handle, e.g. `[".yaml", ".json"]`. |
-| `supports_directories` | bool | yes | Whether the plugin can detect/parse whole directories (not just single files). |
+| `type` | PluginType | yes | `PARSER` for parser plugins. (`PROVIDER` and `PLUGIN_TYPE_UNKNOWN` are the other values.) |
+| `name` | string | yes | Plugin identity, e.g. `"infracost/terraform"` or `"acme/crossplane"`. Must be unique. |
+| `version` | string | no | Plugin version. Semver recommended but not required. |
+| `description` | string | no | Human-readable description shown in CLI output. |
+| `url` | string | no | Where the plugin is documented/downloaded. |
+| `author` | string | no | Company or individual that authored the plugin. |
+
+### GetParserConfig
+
+Returns settings the CLI uses to decide if and how this plugin participates in project identification. Called once after `GetPluginInfo`.
+
+**Request:** Empty.
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `identification_priority` | uint32 | Order in which plugins are offered a directory. **Higher = checked first.** Recommended default is `0`. |
+| `config_file_project_type` | string (optional) | Maps to an `infracost/config` project type, e.g. `"terraform"`, `"cloudformation"`, `"terragrunt"`. Custom strings are allowed. If unset, defaults to the plugin name. |
 
 #### Priority
 
-When multiple plugins claim overlapping file extensions (e.g., `.json` is used by CloudFormation, ARM, and Terraform JSON), priority determines which plugin's `Detect` is called first. The first plugin to return `detected: true` wins.
+When several plugins could claim the same directory, `identification_priority` determines the order in which they are asked. Plugins with a **higher** priority are offered the directory first; the first plugin to identify a project for a given path wins it.
 
-Guidelines for choosing a priority value:
-- **1-19**: Formats with unambiguous extensions (e.g., `.tf` is always Terraform)
-- **20-39**: Formats that require content sniffing but have strong signals
-- **40+**: Formats with weak or generic signals (e.g., any `.yaml` file)
+Leave this at `0` unless your format must take precedence over another. For example, the Terragrunt plugin uses `1` so it is offered a directory before the Terraform plugin (`0`), because a Terragrunt project may contain Terraform files that should not be parsed as standalone Terraform.
 
-Existing plugins use: Terraform=10, ARM=25, CloudFormation=30.
+### IdentifyProjects
 
-### Detect
-
-Determines whether this plugin can handle a given file or directory path. Called for each project path, in plugin priority order.
+Inspects a single directory and reports which paths this plugin can parse. Called for each directory the CLI scans, in identification-priority order.
 
 **Request:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `path` | string | Absolute path to a file or directory. |
-| `content` | bytes | Optional: pre-read file content (for LSP virtual documents). |
-| `content_provided` | bool | `true` if the `content` field is populated. |
+| `directory` | string | Absolute path to a directory to inspect. |
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `detected` | bool | `true` if this plugin claims the path. |
-| `project_type` | string | Identifier for the detected format, e.g. `"pulumi_python"`. Passed back in routing. |
-| `confidence` | DetectConfidence | How strong the detection signal is. |
-
-**Detection confidence levels:**
-- `LOW` — Extension-only heuristic (e.g., "it's a .yaml file")
-- `MEDIUM` — Content sniffing (e.g., "it contains apiVersion + kind fields")
-- `HIGH` — Definitive match (e.g., "the `$schema` URL is an ARM deployment template")
+| `directory` | bool | `true` if the whole directory is a single project of this format. Mutually exclusive with `files`. |
+| `files` | string[] | Individual files in the directory that are each a project in their own right (paths relative to `directory`). Must be empty if `directory` is `true`. |
+| `dependency_paths` | string[] | Paths (relative to `directory`) that this project depends on. Optional. |
 
 **Contract:**
-- Return `detected: false` quickly for paths you don't handle. Don't error on unknown paths.
-- If `content_provided` is true, use the provided content instead of reading from disk.
-- For directory detection, scan only the top-level entries (don't recurse deeply).
-- Detection must be fast (< 100ms). Avoid network calls.
-
-### Initialize
-
-Called once before parsing begins. The CLI passes the set of resource types that the provider plugins can cost.
-
-**Request:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `terraform_supported_resources` | SupportedResources | Resource types the Terraform providers can cost. |
-| `cloudformation_supported_resources` | SupportedResources | Resource types the CloudFormation providers can cost. |
-| `kubernetes_supported_resources` | SupportedResources | Resource types the Kubernetes providers can cost. |
-| `disable_graph_cache` | bool | Set by the LSP for fast re-parses. |
-
-Most plugins can accept this call and return an empty response. Use the supported resources list if you want to mark resources as `supported: true/false` in your parse output.
-
-**Response:** Empty.
+- **Do not recurse.** Inspect only the entries directly inside `directory`; the CLI walks the tree and calls `IdentifyProjects` per directory.
+- Return an empty response (not an error) for directories you don't handle or can't read.
+- Identification must be fast. Avoid network calls.
+- Use `directory: true` for directory-oriented formats (Terraform, Terragrunt). Use `files` for file-oriented formats where each file is an independent project (CloudFormation, ARM).
 
 ### Parse
 
-Parses the IaC files and returns format-specific resource data.
+Parses the IaC at the given path and returns an IaC-agnostic cost tree.
 
 **Request:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `repo_directory` | string | Absolute root of the repository. |
-| `working_directory` | string | Absolute working directory of the project. |
-| `target` | ParseRequestTarget | Format-specific target (oneof). |
-
-The `target` is a protobuf `oneof` — your plugin receives the variant matching your format. For new formats, you'll need to define a new target message in the proto repo and add it to the oneof.
+| `path` | string | Absolute path to the project file or directory to parse. |
+| `generic_options` | GenericOptions | IaC-agnostic options: working/repo directories, cache settings, credential sets, an optional `dependency_request`, etc. See `infracost/parser/options/options.proto`. |
+| `raw_options` | bytes | Plugin-specific options, encoded however your plugin chooses. |
+| `raw_options_format` | string | The encoding of `raw_options`, e.g. `"application/json"`. Document the format your plugin expects. |
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `tree` | tree.Tree | The IaC-agnostic cost tree (providers → services → resources). See `infracost/tree/tree.proto`. |
 | `diagnostics` | Diagnostic[] | Warnings and errors encountered during parsing. |
-| `result` | ParseResponseResult | Format-specific result (oneof). |
-| `dependencies` | Dependency[] | Source-code dependencies (optional, for IDE features). |
-
-The `result` is a protobuf `oneof` matching the format. For new formats, define a new result message.
+| `requested_dependencies` | Dependency[] | Dependencies extracted when `generic_options.dependency_request` was set (optional, for IDE features). |
 
 **Contract:**
-- Return partial results with diagnostics on recoverable errors (e.g., one file in a directory fails to parse).
-- Return an error only for unrecoverable failures (e.g., the target is nil).
-- Resources should have `supported: true` if the provider plugins can cost them.
+- Build the `tree.Tree` from your parsed resources. The tree is the single output format — there is no separate format-specific result.
+- Return partial results with diagnostics on recoverable errors (e.g., one file in a directory fails to parse). Add a `critical` diagnostic for failures that prevented parsing.
+- Return an error only for unrecoverable failures (e.g., `path` is empty).
+- Set `is_supported` on a tree resource if a provider plugin can price it.
 
-### ParseToTree
+#### The cost tree
 
-Like Parse, but returns a provider-agnostic tree structure instead of a format-specific result. This is used by the provider plugins to generate cost estimates. Most plugins implement this by calling their Parse logic internally and converting to the tree format.
+`tree.Tree` is a hierarchy of providers → services → resources:
 
-The tree structure (`tree.Tree`) is a hierarchy of services, resources, and cost components. See `infracost/tree/tree.proto` for the full definition.
+```
+Tree
+ └── providers: map<string, Provider>   // e.g. "aws", "azure", "google"
+      └── services: map<string, Service>
+           └── resources: []Resource    // id, type, region, is_supported, attributes, tags, ...
+```
+
+The wire format is generated from `infracost/tree/tree.proto`. The proto comments recommend building it with the `tree` package's `ToProto()` / `FromProto()` helpers rather than constructing the protobuf messages by hand where those helpers are available to you.
 
 ## Adding a New Format
 
 To add support for a completely new IaC format:
 
-1. **Define proto messages** in the `infracost/proto` repo:
-   - `proto/infracost/parser/<format>/target.proto` — your Target and Options messages
-   - `proto/infracost/parser/<format>/result.proto` — your Result and Resource messages
-   - Add your target to `ParseRequestTarget.oneof` in `service.proto`
-   - Add your result to `ParseResponseResult.oneof` in `service.proto`
-   - Run `make generate` to regenerate Go bindings
+1. **Decide how options are passed.** Most plugins accept their format-specific options as JSON in `ParseRequest.raw_options` with `raw_options_format = "application/json"`, which avoids changing the proto repo. Document the shape you expect.
 
-2. **Build the plugin binary**:
-   - Create `cmd/infracost-parser-plugin-<format>/main.go`
-   - Implement the `ParserService` gRPC server
-   - Follow the handshake and naming conventions above
+2. **Build the plugin binary:**
+   - Create a `main.go` that serves `PluginService` + `ParserService` over the handshake above.
+   - Implement `GetPluginInfo` (returning `type: PARSER`), `GetParserConfig`, `IdentifyProjects`, and `Parse`.
+   - Have `Parse` produce a `tree.Tree`.
 
-3. **Validate** using `infracost plugin validate ./your-binary` (see below)
+3. **Install** the binary in the plugin directory (see [Installing and testing](#installing-and-testing)).
 
-4. **Register with the CLI** (optional, for official plugins):
-   - Add to `ensurePerIaCPlugins` in `cli/pkg/plugins/config.go`
-   - Add routing in `tryPerIaCPlugins` and `legacyRoute` in `cli/pkg/plugins/parser/parse.go`
+For official plugins maintained in the `infracost/parser` repo, also wire the new plugin into the build/release manifest. Community plugins need only be discoverable in the plugin directory.
 
-For community plugins, step 4 is not needed — the CLI discovers any binary matching the naming pattern in the plugin directory.
+## Installing and testing
 
-## Validation
+The CLI discovers plugins by scanning a plugin directory, which defaults to `os.UserCacheDir()/infracost/plugins`:
 
-Use the CLI's built-in validation command to verify your plugin:
+- Linux: `~/.cache/infracost/plugins`
+- macOS: `~/Library/Caches/infracost/plugins`
+- Windows: `%LocalAppData%\infracost\plugins`
 
-```bash
-infracost plugin validate ./infracost-parser-plugin-myplugin
-```
+Drop your built binary in that directory and run `infracost` against a project containing your format. The CLI will launch the binary, call `GetPluginInfo`, and route matching directories to it.
 
-This runs a conformance test suite that checks:
-
-1. **Connectivity** — The binary starts, handshakes, and responds to gRPC
-2. **Describe** — Returns valid metadata (non-empty name, valid priority, extensions)
-3. **Detect** — Returns `detected: false` for paths it doesn't handle (no crashes on unknown input)
-4. **Detect** — Returns `detected: true` for provided test fixtures (if `--fixtures` flag is used)
-5. **Initialize** — Accepts the call without error
-6. **Parse** — Returns a valid ParseResponse for provided test fixtures
-
-You can pass test fixtures to validate detection and parsing:
-
-```bash
-infracost plugin validate ./infracost-parser-plugin-myplugin \
-    --fixture ./testdata/example-project
-```
-
-The validator reports pass/fail for each check with diagnostic output on failure.
+Because the gRPC contract is plain Go, the most reliable way to test a plugin is with Go unit tests that call your service methods directly — see the `server/*_test.go` files alongside each reference plugin in the `infracost/parser` repo for the pattern (table-driven tests with `testdata/` fixtures).
 
 ## Constraints and Limits
 
 - **Max gRPC message size**: 64 MB (both send and receive)
-- **Plugin startup timeout**: 10 seconds
-- **Detection time budget**: < 100ms per path
-- **Binary size**: No hard limit, but aim for < 50 MB for fast downloads
-- **Concurrency**: The CLI may spawn multiple plugin instances in parallel; your plugin should be safe to run concurrently (separate processes, not threads)
+- **Identification**: must be fast and side-effect free; avoid network calls
+- **Binary size**: no hard limit, but aim for fast downloads
+- **Concurrency**: the CLI may run plugins in parallel; plugins are separate processes, so keep any shared on-disk state (caches) concurrency-safe
 
 ## Reference Implementations
 
-See the existing per-IaC plugins in the `infracost/parser` repo for production examples:
-- `cmd/infracost-parser-plugin-terraform/` — Directory-based, high-priority, unambiguous extensions
-- `cmd/infracost-parser-plugin-cloudformation/` — File-based, content-sniffing, ambiguous extensions
-- `cmd/infracost-parser-plugin-arm/` — File-based, schema-URL sniffing, JSON-only
+See the per-IaC parser plugins in the `infracost/parser` repo for production examples (each is a `main.go` plus a `server/` package with one file per RPC):
+- `plugin/terraform/` — directory-based, identifies whole directories
+- `plugin/terragrunt/` — directory-based, higher identification priority than Terraform
+- `plugin/cloudformation/` — file-based, content-sniffs `.json`/`.yaml`/`.yml`
 
-For a minimal starting point, see the `example/` directory in this repo.
+For a minimal starting point, see the [`example/`](example) directory in this repo.
