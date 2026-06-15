@@ -8,7 +8,7 @@ require (
 	google.golang.org/grpc v1.79.3
 )
 
-// Local development — remove once the Describe/Detect RPCs are in a tagged proto release.
+// Local development — remove once the infracost.plugin protos are in a tagged proto release.
 replace github.com/infracost/proto => ../../../proto
 
 require (

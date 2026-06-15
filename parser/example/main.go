@@ -1,39 +1,48 @@
 // infracost-parser-plugin-example is a minimal parser plugin that demonstrates
-// the full interface contract. It detects ".example" files and returns a single
-// dummy resource for each one. Use this as a starting point for new plugins.
+// the full plugin interface contract. It identifies ".example" files in a
+// directory and returns an empty cost tree for each one. Use this as a starting
+// point for new parser plugins.
 package main
 
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/hashicorp/go-plugin"
-	"github.com/infracost/proto/gen/go/infracost/parser/api"
-	"github.com/infracost/proto/gen/go/infracost/parser/cloudformation"
-	"github.com/infracost/proto/gen/go/infracost/parser/options"
+	goplugin "github.com/hashicorp/go-plugin"
+	pluginpb "github.com/infracost/proto/gen/go/infracost/plugin"
+	"github.com/infracost/proto/gen/go/infracost/tree"
 	"google.golang.org/grpc"
 )
 
 const maxMessageSize = 64 * 1024 * 1024
 
+// handshake is shared by every Infracost plugin, parser and provider alike.
+// The CLI identifies the plugin type at runtime via the GetPluginInfo RPC, not
+// from the handshake or the binary name, so there is a single magic cookie.
+var handshake = goplugin.HandshakeConfig{
+	ProtocolVersion:  1,
+	MagicCookieKey:   "INFRACOST_PLUGIN",
+	MagicCookieValue: "de8c7e96-497c-4168-80c4-fc875c8ce764",
+}
+
 var (
-	_ plugin.Plugin     = (*exampleParser)(nil)
-	_ plugin.GRPCPlugin = (*exampleParser)(nil)
+	_ goplugin.Plugin     = (*examplePlugin)(nil)
+	_ goplugin.GRPCPlugin = (*examplePlugin)(nil)
 )
 
-type exampleParser struct {
-	plugin.NetRPCUnsupportedPlugin
+type examplePlugin struct {
+	goplugin.NetRPCUnsupportedPlugin
 }
 
 func main() {
-	plugin.Serve(&plugin.ServeConfig{
-		HandshakeConfig: plugin.HandshakeConfig{
-			ProtocolVersion:  1,
-			MagicCookieKey:   "INFRACOST_PARSER_PLUGIN_MAGIC_COOKIE",
-			MagicCookieValue: "ac92b06c592f",
-		},
-		Plugins: map[string]plugin.Plugin{
-			"parser": new(exampleParser),
+	goplugin.Serve(&goplugin.ServeConfig{
+		HandshakeConfig: handshake,
+		Plugins: map[string]goplugin.Plugin{
+			// The dispense key is always "plugin".
+			"plugin": &examplePlugin{},
 		},
 		GRPCServer: func(opts []grpc.ServerOption) *grpc.Server {
 			opts = append(opts,
@@ -45,83 +54,89 @@ func main() {
 	})
 }
 
-func (p *exampleParser) GRPCServer(_ *plugin.GRPCBroker, g *grpc.Server) error {
-	api.RegisterParserServiceServer(g, &exampleService{})
+func (p *examplePlugin) GRPCServer(_ *goplugin.GRPCBroker, g *grpc.Server) error {
+	svc := &exampleService{}
+	// Every plugin implements PluginService (identity) plus one of
+	// ParserService / ProviderService. Register both on the same server.
+	pluginpb.RegisterPluginServiceServer(g, svc)
+	pluginpb.RegisterParserServiceServer(g, svc)
 	return nil
 }
 
-func (p *exampleParser) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
+func (p *examplePlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-// exampleService implements the ParserService gRPC server.
+// exampleService implements both PluginService and ParserService. Embedding the
+// Unimplemented servers keeps it forward-compatible if new RPCs are added.
 type exampleService struct {
-	api.UnimplementedParserServiceServer
+	pluginpb.UnimplementedPluginServiceServer
+	pluginpb.UnimplementedParserServiceServer
 }
 
-func (s *exampleService) Describe(_ context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
-	return &api.DescribeResponse{
-		Name:                "plugins.infracost.io/example/example",
-		DisplayName:         "Example Format",
-		Priority:            50,
-		FileExtensions:      []string{".example"},
-		SupportsDirectories: false,
+// GetPluginInfo (PluginService) reports the plugin's identity and type. The CLI
+// calls this first to decide how to use the binary.
+func (s *exampleService) GetPluginInfo(_ context.Context, _ *pluginpb.GetPluginInfoRequest) (*pluginpb.GetPluginInfoResponse, error) {
+	return &pluginpb.GetPluginInfoResponse{
+		Type:        pluginpb.PluginType_PARSER,
+		Name:        "example/example",
+		Version:     "0.1.0",
+		Description: "Parses .example files",
+		Url:         "https://github.com/acme/infracost-parser-plugin-example",
+		Author:      "Acme",
 	}, nil
 }
 
-func (s *exampleService) Detect(_ context.Context, req *api.DetectRequest) (*api.DetectResponse, error) {
-	path := req.GetPath()
-	if path == "" {
-		return &api.DetectResponse{Detected: false}, nil
-	}
-
-	if len(path) > 8 && path[len(path)-8:] == ".example" {
-		return &api.DetectResponse{
-			Detected:    true,
-			ProjectType: "example",
-			Confidence:  api.DetectConfidence_DETECT_CONFIDENCE_HIGH,
-		}, nil
-	}
-
-	return &api.DetectResponse{Detected: false}, nil
-}
-
-func (s *exampleService) Initialize(_ context.Context, _ *api.InitializeRequest) (*api.InitializeResponse, error) {
-	return &api.InitializeResponse{}, nil
-}
-
-func (s *exampleService) Parse(_ context.Context, req *api.ParseRequest) (*api.ParseResponse, error) {
-	if req == nil || req.Target == nil {
-		return nil, fmt.Errorf("request and target cannot be nil")
-	}
-
-	// This example returns a CloudFormation-shaped result with a single
-	// dummy resource. A real plugin would define its own target/result
-	// proto messages and parse actual IaC files here.
-	return &api.ParseResponse{
-		Result: &api.ParseResponseResult{
-			Value: &api.ParseResponseResult_Cloudformation{
-				Cloudformation: &cloudformation.Result{
-					Resources: map[string]*cloudformation.Resource{
-						"ExampleResource": {
-							Id:        "ExampleResource",
-							Type:      "Example::Service::Resource",
-							Supported: false,
-						},
-					},
-				},
-			},
-		},
+// GetParserConfig (ParserService) tells the CLI how this plugin participates in
+// project identification.
+func (s *exampleService) GetParserConfig(_ context.Context, _ *pluginpb.GetParserConfigRequest) (*pluginpb.GetParserConfigResponse, error) {
+	return &pluginpb.GetParserConfigResponse{
+		// 0 is the recommended default. Plugins with a higher priority are
+		// offered a directory before lower-priority plugins.
+		IdentificationPriority: 0,
+		// ConfigFileProjectType is left unset, so it defaults to the plugin
+		// name. Set it to map onto an existing infracost/config project type.
 	}, nil
 }
 
-func (s *exampleService) ParseToTree(_ context.Context, req *api.ParseToTreeRequest) (*api.ParseToTreeResponse, error) {
-	if req == nil || req.Target == nil {
-		return nil, fmt.Errorf("request and target cannot be nil")
+// IdentifyProjects (ParserService) inspects a single directory (it must NOT
+// recurse) and reports which paths this plugin can parse.
+func (s *exampleService) IdentifyProjects(_ context.Context, req *pluginpb.IdentifyProjectsRequest) (*pluginpb.IdentifyProjectsResponse, error) {
+	entries, err := os.ReadDir(req.GetDirectory())
+	if err != nil {
+		// Return an empty response rather than an error for paths we can't read.
+		return &pluginpb.IdentifyProjectsResponse{}, nil
 	}
 
-	return &api.ParseToTreeResponse{}, nil
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(entry.Name()), ".example") {
+			// Each matching file is its own project. Return paths relative to
+			// the directory. To claim the whole directory as a single project
+			// instead, set Directory: true and leave Files empty.
+			files = append(files, entry.Name())
+		}
+	}
+
+	return &pluginpb.IdentifyProjectsResponse{Files: files}, nil
 }
 
-// Ensure GenericOptions is referenced so go mod tidy keeps it.
-var _ = (*options.GenericOptions)(nil)
+// Parse (ParserService) reads the IaC at req.Path and returns an IaC-agnostic
+// cost tree. A real plugin would build the tree from the parsed resources; this
+// example returns an empty tree.
+func (s *exampleService) Parse(_ context.Context, req *pluginpb.ParseRequest) (*pluginpb.ParseResponse, error) {
+	if req.GetPath() == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+
+	// req.GenericOptions carries IaC-agnostic settings (working directory,
+	// dependency requests, etc.). Plugin-specific options arrive as raw bytes
+	// in req.RawOptions, encoded as req.RawOptionsFormat (e.g. "application/json").
+
+	return &pluginpb.ParseResponse{
+		Tree: &tree.Tree{},
+	}, nil
+}

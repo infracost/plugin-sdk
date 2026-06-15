@@ -23,5 +23,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-// Local development — remove once the provider RPCs are in a tagged proto release.
+// Local development — remove once the infracost.plugin protos are in a tagged proto release.
 replace github.com/infracost/proto => ../../../proto
