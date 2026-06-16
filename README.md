@@ -6,7 +6,7 @@ Infracost has two types of plugins:
 
 | | Parser Plugin | Provider Plugin |
 |---|---|---|
-| **Purpose** | Extract resources from IaC files into a cost tree | Price the cost tree |
+| **Purpose** | Extract resources from IaC files into a cost tree | Price the cost tree and apply policies |
 | **Plugin type** | `GetPluginInfo` reports `PARSER` | `GetPluginInfo` reports `PROVIDER` |
 | **Services** | `PluginService` + `ParserService` | `PluginService` + `ProviderService` |
 | **RPCs** | GetPluginInfo · GetParserConfig · IdentifyProjects · Parse | GetPluginInfo · Process · ListFinopsPolicies |
