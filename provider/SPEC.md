@@ -143,6 +143,24 @@ The `TreeInput` message (`infracost/provider/tree.proto`) includes:
 | `features` | Features | Feature flags (price lookups, recommendations, policies, environmental metrics). |
 | `settings` | Settings | Currency code, disk cache preferences. |
 | `infracost` | Infracost | Infracost-specific credentials (API key, pricing endpoint, trace/org IDs). Community providers should ignore these. |
+| `raw_options` | bytes | Provider-specific options, encoded however your plugin chooses (mirrors the parser's `ParseRequest.raw_options`). |
+| `raw_options_format` | string | The encoding of `raw_options`, e.g. `"application/json"`. Document the format your plugin expects. |
+
+#### Provider options
+
+Like parser plugins, a provider plugin can take its own options. The CLI builds
+them per provider plugin (keyed by the plugin's `GetPluginInfo` name), JSON-
+marshals a typed struct, and sends it on `TreeInput.raw_options` with
+`raw_options_format = "application/json"`; `Process` decodes the bytes into its
+own struct. This is the generic, IaC-agnostic way to pass plugin-specific
+configuration — prefer it over out-of-band channels (env vars, files).
+
+Worked example — the **kubernetes** provider: Kubernetes manifests carry no
+cluster topology (node pools, regions), so the CLI resolves a cluster spec (e.g.
+from `--kubernetes-cluster-from`), JSON-encodes it, and sends it on
+`raw_options`. The provider decodes it and prices pod requests against the
+cluster's node pools. No Kubernetes-specific field was added to the shared
+contract.
 
 **Response:**
 
