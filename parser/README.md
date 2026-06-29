@@ -4,68 +4,67 @@ Build custom parser plugins to teach [Infracost](https://infracost.io) how to re
 
 ## What is a parser plugin?
 
-Infracost uses parser plugins to extract resources from IaC files (Terraform, CloudFormation, ARM, etc.). Each plugin is a standalone binary that communicates with the Infracost CLI over gRPC. The CLI discovers plugins by scanning a directory for binaries named `infracost-parser-plugin-<name>`.
+Infracost uses parser plugins to extract resources from IaC files (Terraform, CloudFormation, etc.) into an IaC-agnostic cost tree. Each plugin is a standalone binary that communicates with the Infracost CLI over gRPC.
 
-When Infracost encounters a project, it asks each plugin (in priority order) whether it can handle the path. The first plugin to claim the path parses it and returns the extracted resources for cost estimation.
+The CLI discovers plugins by launching every binary in its plugin directory and calling `GetPluginInfo`. Plugins that report `type: PARSER` are then asked, in identification-priority order, which paths in each scanned directory they can parse. The plugin that claims a path parses it into a cost tree for the provider plugins to price.
 
 ## Quick start
 
-1. Copy the `example/` directory as your starting point
-2. Rename the binary and update `Describe()` with your format's metadata
-3. Implement `Detect()` to recognize your IaC files
-4. Implement `Parse()` to extract resources
-5. Validate with `infracost plugin validate ./your-binary`
+1. Copy the [`example/`](example) directory as your starting point
+2. Update `GetPluginInfo()` with your plugin's name and metadata
+3. Implement `IdentifyProjects()` to recognise your IaC files in a directory
+4. Implement `Parse()` to extract resources into a `tree.Tree`
+5. Build and install the binary into the plugin directory
 
-### Build and validate the example
+### Build the example
 
 ```bash
 cd example
 go build -o infracost-parser-plugin-example .
-infracost plugin validate ./infracost-parser-plugin-example
 ```
 
-### Test with a fixture
+### Install it where the CLI can find it
+
+The CLI scans `os.UserCacheDir()/infracost/plugins` (Linux `~/.cache/...`, macOS `~/Library/Caches/...`). The `Makefile` has an `install` target that copies the binary there:
 
 ```bash
-echo "hello" > test.example
-infracost plugin validate ./infracost-parser-plugin-example --fixture test.example
+make install
 ```
+
+Then run `infracost` against a project containing your format.
 
 ## Interface contract
 
-Your plugin must implement five gRPC RPCs:
+Your plugin implements two gRPC services:
+
+**PluginService**
 
 | RPC | Purpose |
 |-----|---------|
-| **Describe** | Return plugin metadata (name, priority, file extensions) |
-| **Detect** | Check if the plugin can handle a given path |
-| **Initialize** | Accept supported resource types from the CLI |
-| **Parse** | Parse IaC files and return resources |
-| **ParseToTree** | Parse into a provider-agnostic tree (for cost estimation) |
+| **GetPluginInfo** | Report the plugin type (`PARSER`) and metadata (name, version, description) |
 
-See [SPEC.md](SPEC.md) for the full specification including message formats, detection contracts, and priority guidelines.
+**ParserService**
 
-## Validation
+| RPC | Purpose |
+|-----|---------|
+| **GetParserConfig** | Report identification priority and project-type mapping |
+| **IdentifyProjects** | Report which paths in a directory this plugin can parse (no recursion) |
+| **Parse** | Parse a path into an IaC-agnostic `tree.Tree` |
 
-The Infracost CLI includes a built-in conformance test suite:
+Both services are registered on the same gRPC server using a shared handshake. See [SPEC.md](SPEC.md) for the full specification, including the handshake, message formats, priority semantics, and the cost-tree structure.
 
-```bash
-infracost plugin validate ./infracost-parser-plugin-myformat
-```
+## Testing
 
-Checks:
-- Binary starts and handshakes correctly
-- `Describe` returns valid metadata
-- `Detect` handles empty and nonexistent paths gracefully
-- `Initialize` accepts the call without error
-- With `--fixture`: `Detect` claims the fixture, `Parse` returns a response
+The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that call your service methods directly with `testdata/` fixtures. The reference plugins in the [infracost/parser](https://github.com/infracost/parser) repo follow this pattern (`server/*_test.go`).
+
+To try it end to end, install the binary in the plugin directory (`make install`) and run `infracost` against a project.
 
 ## Adding a new IaC format
 
-For a completely new format (not just a variant of an existing one), you'll also need to define proto messages for your target and result types. See the "Adding a New Format" section in [SPEC.md](SPEC.md).
+Most formats can pass their format-specific options as JSON via `ParseRequest.raw_options`, so no proto changes are needed. See the "Adding a New Format" section in [SPEC.md](SPEC.md).
 
 ## Reference
 
 - [SPEC.md](SPEC.md) — Full plugin interface specification
-- [example/](example/) — Minimal working plugin
+- [example/](example) — Minimal working plugin
 - [infracost/parser](https://github.com/infracost/parser) — Production plugin implementations
