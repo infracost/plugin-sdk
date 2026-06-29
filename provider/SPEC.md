@@ -1,6 +1,6 @@
 # Infracost Provider Plugin Specification
 
-This document defines the interface contract for Infracost provider plugins. A provider plugin takes resources extracted by a parser plugin and returns cost estimates. The SDK makes no assumption about how prices are obtained — implementations may hardcode prices, query cloud APIs directly, use the Infracost Cloud API, or any other mechanism.
+This document defines the interface contract for Infracost provider plugins. A provider plugin takes the IaC-agnostic cost tree extracted by a parser plugin and returns cost estimates and FinOps policy results. The SDK makes no assumption about how prices are obtained — implementations may hardcode prices, query cloud APIs directly, use the Infracost Cloud API, or any other mechanism.
 
 ## Architecture Overview
 
@@ -8,113 +8,104 @@ This document defines the interface contract for Infracost provider plugins. A p
 infracost scan
     |
     v
-Parser plugins extract resources from IaC files
+Parser plugins extract resources into an IaC-agnostic cost tree
     |
     v
-Provider plugins price the extracted resources
+Provider plugins price the tree and evaluate FinOps policies
     |
     v
-CLI aggregates costs, evaluates policies, and renders output
+CLI aggregates costs, evaluates output, and renders results
 ```
 
 Plugins are standalone binaries that communicate with the Infracost CLI over gRPC using the [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin) framework. The CLI spawns the plugin process, performs a handshake, and issues gRPC calls. When processing is complete the plugin process exits.
 
-## Plugin Naming
+Every plugin implements two gRPC services:
 
-Every plugin has a **canonical name** in `registry/namespace/name` format:
+- **`PluginService`** — a single `GetPluginInfo` RPC that reports the plugin's type and metadata. This is how the CLI tells provider plugins apart from parser plugins.
+- **`ProviderService`** — the pricing RPCs (`Process`, `ListFinopsPolicies`).
 
-```
-plugins.infracost.io/infracost/aws
-plugins.infracost.io/acme/oracle
-plugins.example.com/acme/custom
-```
+Both services are registered on the same gRPC server (see [Handshake](#go-plugin-handshake)).
 
-Resolution rules (short forms expand to the full canonical name):
-- `aws` → `plugins.infracost.io/infracost/aws` (official plugin, default registry)
-- `acme/oracle` → `plugins.infracost.io/acme/oracle` (community plugin, default registry)
-- `plugins.example.com/acme/custom` → as-is (custom registry, first segment contains a dot)
+## Plugin Identity and Naming
 
-The `infracost/` namespace is reserved for official plugins.
+The CLI **does not** infer a plugin's type or identity from its binary filename. It launches every executable in the plugin directory, calls `GetPluginInfo`, and uses the returned `type` to decide whether the binary is a parser or a provider. Binaries that fail to launch or handshake are skipped.
 
-The canonical name is returned by the `Describe` RPC and is the source of truth for plugin identity.
+A descriptive binary name such as `infracost-provider-plugin-<name>` is conventional and recommended for clarity, but it is not required for discovery.
 
-## Binary Naming Convention
+The `name` returned by `GetPluginInfo` is the plugin's identity. By convention it is `<namespace>/<name>`:
 
-Plugin binaries **must** be named:
+- Official plugins use the `infracost/` namespace, e.g. `infracost/aws`, `infracost/azure`, `infracost/google`.
+- Community plugins should use their own namespace, e.g. `acme/oracle`.
 
-```
-infracost-provider-plugin-<identifier>
-```
-
-For official plugins (in the `infracost/` namespace), the identifier is the short name:
-- `infracost-provider-plugin-aws` (canonical: `plugins.infracost.io/infracost/aws`)
-
-For community plugins, slashes in the namespace are replaced with double-dashes:
-- `infracost-provider-plugin-acme--oracle` (canonical: `plugins.infracost.io/acme/oracle`)
-
-Rules:
-- On Windows, the `.exe` extension is added automatically
-- Binaries ending in `-debug` are ignored (use this for debug builds)
-- After discovery, the CLI calls `Describe` to get the canonical name — the binary filename is only for discovery
+Names must be unique across all installed plugins.
 
 ## go-plugin Handshake
 
-Every plugin must use this exact handshake configuration:
+All Infracost plugins — parser and provider alike — share one handshake. The type is resolved at runtime via `GetPluginInfo`, so there is a single magic cookie rather than a per-type one.
 
 ```go
-plugin.Serve(&plugin.ServeConfig{
-    HandshakeConfig: plugin.HandshakeConfig{
+const maxMessageSize = 64 * 1024 * 1024
+
+goplugin.Serve(&goplugin.ServeConfig{
+    HandshakeConfig: goplugin.HandshakeConfig{
         ProtocolVersion:  1,
-        MagicCookieKey:   "INFRACOST_PROVIDER_PLUGIN_MAGIC_COOKIE",
-        MagicCookieValue: "04d179d767fc",
+        MagicCookieKey:   "INFRACOST_PLUGIN",
+        MagicCookieValue: "de8c7e96-497c-4168-80c4-fc875c8ce764",
     },
-    Plugins: map[string]plugin.Plugin{
-        "provider": yourPluginStruct,
+    Plugins: map[string]goplugin.Plugin{
+        // The dispense key is always "plugin".
+        "plugin": yourPluginStruct,
     },
     GRPCServer: func(opts []grpc.ServerOption) *grpc.Server {
         opts = append(opts,
-            grpc.MaxRecvMsgSize(64 * 1024 * 1024),
-            grpc.MaxSendMsgSize(64 * 1024 * 1024),
+            grpc.MaxRecvMsgSize(maxMessageSize),
+            grpc.MaxSendMsgSize(maxMessageSize),
         )
         return grpc.NewServer(opts...)
     },
 })
 ```
 
-The plugin struct must implement `plugin.GRPCPlugin`:
+The plugin struct must implement `plugin.GRPCPlugin` and register **both** services on the server:
 
 ```go
 type myPlugin struct {
-    plugin.NetRPCUnsupportedPlugin
+    goplugin.NetRPCUnsupportedPlugin
 }
 
-func (p *myPlugin) GRPCServer(_ *plugin.GRPCBroker, g *grpc.Server) error {
-    provider.RegisterProviderServiceServer(g, myServiceImplementation)
+func (p *myPlugin) GRPCServer(_ *goplugin.GRPCBroker, g *grpc.Server) error {
+    pluginpb.RegisterPluginServiceServer(g, myServiceImplementation)
+    pluginpb.RegisterProviderServiceServer(g, myServiceImplementation)
     return nil
 }
 
-func (p *myPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
+func (p *myPlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
     return nil, fmt.Errorf("not implemented")
 }
 ```
 
+The generated Go bindings live in `github.com/infracost/proto/gen/go/infracost/plugin` (aliased `pluginpb` above). Embedding `pluginpb.UnimplementedPluginServiceServer` and `pluginpb.UnimplementedProviderServiceServer` in your service struct keeps it forward-compatible if new RPCs are added.
+
 ## gRPC Service Contract
 
-Plugins implement the `ProviderService` defined in `infracost/provider/service.proto`:
+Plugins implement `PluginService` and `ProviderService`, both defined in the `infracost.plugin` package:
 
 ```protobuf
+// infracost/plugin/plugin.proto
+service PluginService {
+    rpc GetPluginInfo(GetPluginInfoRequest) returns (GetPluginInfoResponse);
+}
+
+// infracost/plugin/provider.proto
 service ProviderService {
-    rpc Describe(DescribeRequest) returns (DescribeResponse);
     rpc Process(ProcessRequest) returns (ProcessResponse);
-    rpc ProcessTree(ProcessTreeRequest) returns (ProcessTreeResponse);
     rpc ListFinopsPolicies(ListFinopsPoliciesRequest) returns (ListFinopsPoliciesResponse);
-    rpc ListSupportedResources(ListSupportedResourcesRequest) returns (ListSupportedResourcesResponse);
 }
 ```
 
-### Describe
+### GetPluginInfo
 
-Returns static metadata about the plugin. Called once at startup when the CLI discovers the binary.
+Returns the plugin's type and static metadata. Called once at startup when the CLI discovers the binary.
 
 **Request:** Empty.
 
@@ -122,77 +113,69 @@ Returns static metadata about the plugin. Called once at startup when the CLI di
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Canonical plugin name in `registry/namespace/name` format, e.g. `"plugins.infracost.io/infracost/aws"`. |
-| `display_name` | string | yes | Human-readable name, e.g. `"AWS"`. Shown in CLI output. |
-
-### ListSupportedResources
-
-Declares which resource types this provider can price. The CLI uses this to tell parser plugins which resources are "supported" (have cost data available).
-
-**Request:** Empty.
-
-**Response:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `terraform` | SupportedResources | Terraform resource types this provider can price (e.g. `aws_instance`, `aws_s3_bucket`). |
-| `cloudformation` | SupportedResources | CloudFormation resource types this provider can price (e.g. `AWS::EC2::Instance`). |
-| `kubernetes` | SupportedResources | Kubernetes resource types this provider can price. |
-
-Each `SupportedResources` contains a list of `SupportedResource` messages with a `resource_type` string field.
-
-**Contract:**
-- Return at least one resource type across all categories.
-- Resource type strings must match the parser's output exactly (case-sensitive).
+| `type` | PluginType | yes | `PROVIDER` for provider plugins. (`PARSER` and `PLUGIN_TYPE_UNKNOWN` are the other values.) |
+| `name` | string | yes | Plugin identity, e.g. `"infracost/aws"` or `"acme/oracle"`. Must be unique. |
+| `version` | string | no | Plugin version. Semver recommended but not required. |
+| `description` | string | no | Human-readable description shown in CLI output. |
+| `url` | string | no | Where the plugin is documented/downloaded. |
+| `author` | string | no | Company or individual that authored the plugin. |
 
 ### Process
 
-Takes a flat list of parsed resources (from `Parse`) and returns cost estimates.
+Receives the IaC-agnostic cost tree and returns priced resources and FinOps policy results.
 
 **Request:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `input` | Input | Contains the parse result, usage data, project info, feature flags, and settings. |
+| `input` | TreeInput | The cost tree plus usage data, project info, feature flags, and settings. |
 
-The `Input` message includes:
+The `TreeInput` message (`infracost/provider/tree.proto`) includes:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `parse_result` | ParseResponse | The output of a parser plugin. |
-| `absolute_path` | string | Path to the project being scanned. |
-| `project_info` | ProjectInfo | Project name, branch, workspace. |
+| `tree` | tree.Tree | The parser output as an IaC-agnostic tree (providers → services → resources). |
+| `absolute_path` | string | Path to the project being scanned (a directory for Terraform/Terragrunt, a file for CloudFormation). |
+| `project_info` | ProjectInfo | Project name, branch, workspace, production flag. |
+| `previous_resource_addresses` | string[] | Resource addresses seen on a previous run, used to decide which resources are "new". |
 | `usage` | Usage | Usage data for usage-based resources. |
-| `features` | Features | Feature flags (enable price lookups, recommendations, policies, etc.). |
+| `finops_policy_config` | FinopsPolicyConfiguration | Which policies to run and their settings (only relevant if `features.enable_finops_policies`). |
+| `features` | Features | Feature flags (price lookups, recommendations, policies, environmental metrics). |
 | `settings` | Settings | Currency code, disk cache preferences. |
+| `infracost` | Infracost | Infracost-specific credentials (API key, pricing endpoint, trace/org IDs). Community providers should ignore these. |
+| `raw_options` | bytes | Provider-specific options, encoded however your plugin chooses (mirrors the parser's `ParseRequest.raw_options`). |
+| `raw_options_format` | string | The encoding of `raw_options`, e.g. `"application/json"`. Document the format your plugin expects. |
+
+#### Provider options
+
+Like parser plugins, a provider plugin can take its own options. The CLI builds
+them per provider plugin (keyed by the plugin's `GetPluginInfo` name), JSON-
+marshals a typed struct, and sends it on `TreeInput.raw_options` with
+`raw_options_format = "application/json"`; `Process` decodes the bytes into its
+own struct. This is the generic, IaC-agnostic way to pass plugin-specific
+configuration — prefer it over out-of-band channels (env vars, files).
+
+Worked example — the **kubernetes** provider: Kubernetes manifests carry no
+cluster topology (node pools, regions), so the CLI resolves a cluster spec (e.g.
+from `--kubernetes-cluster-from`), JSON-encodes it, and sends it on
+`raw_options`. The provider decodes it and prices pod requests against the
+cluster's node pools. No Kubernetes-specific field was added to the shared
+contract.
 
 **Response:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `output` | Output | Contains priced resources and FinOps policy results. |
+| `output` | Output | Priced resources and FinOps policy results. See [Output Format](#output-format). |
 
-### ProcessTree
-
-Like Process, but receives a provider-agnostic tree structure instead of a format-specific parse result. This is the modern path used by per-IaC parser plugins.
-
-**Request:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `input` | TreeInput | Contains the tree, usage data, project info, feature flags, and settings. |
-
-The `TreeInput` message is identical to `Input` except `parse_result` is replaced by `tree` (a `tree.Tree`).
-
-**Response:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `output` | Output | Contains priced resources and FinOps policy results. |
+**Contract:**
+- Walk `input.tree` (providers → services → resources), price the resources you support, and return them in `output.resources`.
+- Return an empty `Output` rather than an error when there is nothing to price.
+- Honour `input.settings.currency`; convert prices to the requested currency where you can.
 
 ### ListFinopsPolicies
 
-Returns the set of FinOps policies this provider can evaluate. Policies are rules like "use GP3 instead of GP2 for EBS volumes" or "avoid oversized instances."
+Returns the set of FinOps policies this provider can evaluate. Policies are rules like "use GP3 instead of GP2 for EBS volumes" or "avoid oversized instances".
 
 **Request:** Empty.
 
@@ -200,7 +183,17 @@ Returns the set of FinOps policies this provider can evaluate. Policies are rule
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `policies` | FinopsPolicy[] | Available policies with slug, name, group, description, and applicability flags. |
+| `policies` | FinopsPolicy[] | Available policies. |
+
+Each `FinopsPolicy` has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `slug` | string | Unique policy identifier. |
+| `name` | string | Human-readable name. |
+| `group` | string | Grouping/category. |
+| `description` | string | Human-readable description. |
+| `only_new_resources` | bool | Whether the policy applies only to newly added resources. |
 
 **Contract:**
 - Return an empty list if the provider does not evaluate any policies.
@@ -208,7 +201,12 @@ Returns the set of FinOps policies this provider can evaluate. Policies are rule
 
 ## Output Format
 
-The `Output` message contains:
+The `Output` message (`infracost/provider/output.proto`) contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resources` | Resource[] | Normalised, priced, IaC-agnostic resources. |
+| `finops_results` | FinopsPolicyResult[] | Per-policy pass/fail results. |
 
 ### Resource
 
@@ -218,31 +216,36 @@ The `Output` message contains:
 | `type` | string | Resource type (e.g. `aws_instance`, `AWS::EC2::Instance`). |
 | `name` | string | Full resource address. |
 | `region` | string | Cloud region (e.g. `us-east-1`). |
+| `metadata` | ResourceMetadata | Filename, line numbers, checksums. |
 | `is_supported` | bool | Whether this provider can price the resource. |
 | `is_free` | bool | Whether the resource has no associated costs. |
+| `is_provider_supported` | bool | Whether the resource's provider is supported at all. |
+| `action` | ResourceAction | Whether the resource was added/modified/deleted/unchanged this run. |
 | `costs` | ResourceCosts | Cost components for this resource. |
+| `tagging` | Tagging | Resource-level tag information. |
 | `child_resources` | Resource[] | Nested resources (e.g. a disk belonging to a VM). |
 
 ### CostComponent
 
-Each resource's costs contain a list of `CostComponent` messages:
+Each resource's `costs.components` is a list of `CostComponent` messages:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Display name (e.g. `"Compute (t3.small, on-demand)"`). |
 | `unit` | string | Unit of measurement (e.g. `"hours"`, `"GB"`, `"requests"`). |
 | `usage_based` | bool | Whether the price depends on usage data. |
-| `price_not_found` | bool | True if no price was found (the provider should still return the component). |
+| `price_not_found` | bool | True if no price was found (still return the component). |
 | `price_was_hardcoded` | bool | True if the price was hardcoded rather than looked up dynamically. |
 | `period_price` | PeriodPrice | Price per unit per period. |
 | `quantity` | Rat | Number of units. |
-| `discount_rate` | Rat | Discount rate (0.0 = no discount, 0.3 = 30% off). |
+| `discount_rate` | Rat | Discount rate (0.0 = none, 0.3 = 30% off). |
+| `environmental_metrics` | EnvironmentalMetrics | Optional carbon/water metrics. |
 
 ### PeriodPrice
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `price` | Rat | The price as a rational number (numerator/denominator as big-endian byte arrays). |
+| `price` | Rat | The price as a rational number. |
 | `period` | Period | `MONTH` or `HOUR`. |
 
 ### Rat (Rational Number)
@@ -267,33 +270,29 @@ The provider plugin interface is deliberately agnostic about how prices are obta
 - **Use the Infracost Cloud API** — The official Infracost providers use this approach
 - **Combine approaches** — e.g., hardcode some prices and look up others dynamically
 
-The `Input.settings` message includes a currency code so the provider can return prices in the user's preferred currency. The `Input.infracost` message contains Infracost-specific credentials that only apply to providers using the Infracost Cloud API — community providers should ignore these fields.
+`TreeInput.settings` includes a currency code so the provider can return prices in the user's preferred currency. `TreeInput.infracost` contains Infracost-specific credentials that only apply to providers using the Infracost Cloud API — community providers should ignore these fields.
 
-## Validation
+## Installing and testing
 
-Use the CLI's built-in validation command to verify your plugin:
+The CLI discovers plugins by scanning a plugin directory, which defaults to `os.UserCacheDir()/infracost/plugins`:
 
-```bash
-infracost plugin validate ./infracost-provider-plugin-myprovider
-```
+- Linux: `~/.cache/infracost/plugins`
+- macOS: `~/Library/Caches/infracost/plugins`
+- Windows: `%LocalAppData%\infracost\plugins`
 
-This runs a conformance test suite that checks:
+Drop your built binary in that directory and run `infracost` against a project. The CLI will launch the binary, call `GetPluginInfo`, and route the cost tree to it if it reports `type: PROVIDER`.
 
-1. **Connectivity** — The binary starts, handshakes, and responds to gRPC
-2. **ListSupportedResources** — Returns at least one supported resource type
-3. **Process** — Accepts an empty request without crashing
-4. **ListFinopsPolicies** — Accepts the call without error
+Because the gRPC contract is plain Go, the most reliable way to test a provider is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly. See the tests in the `infracost/providers` repo for the pattern.
 
 ## Constraints and Limits
 
 - **Max gRPC message size**: 64 MB (both send and receive)
-- **Plugin startup timeout**: 10 seconds
-- **Binary size**: No hard limit, but aim for < 50 MB for fast downloads
-- **Concurrency**: The CLI may spawn multiple plugin instances in parallel; your plugin should be safe to run concurrently (separate processes, not threads)
+- **Binary size**: no hard limit, but aim for fast downloads
+- **Concurrency**: the CLI may run plugins in parallel; plugins are separate processes, so keep any shared on-disk state (caches) concurrency-safe
 
 ## Reference Implementations
 
-See the official Infracost provider plugin in the `infracost/providers` repo:
-- `cmd/infracost-provider-plugin/` — Production implementation supporting AWS, Azure, and GCP
+See the official Infracost provider plugins in the `infracost/providers` repo:
+- `plugin/aws/`, `plugin/azure/`, `plugin/google/` — per-cloud binaries built on a shared `internal/plugin` server, each scoped to one cloud's pricing and policies.
 
-For a minimal starting point, see the `example/` directory in this repo.
+For a minimal starting point, see the [`example/`](example) directory in this repo.
