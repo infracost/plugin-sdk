@@ -2,10 +2,15 @@
 
 BINARY = infracost-parser-plugin-example
 
-# Where the Infracost CLI discovers plugins. The default is os.UserCacheDir()/
-# infracost/plugins — on Linux ~/.cache/infracost/plugins, on macOS
-# ~/Library/Caches/infracost/plugins. Override if needed.
-PLUGIN_DIR ?= $(HOME)/.cache/infracost/plugins
+# Where the Infracost CLI discovers plugins. This mirrors Go's os.UserCacheDir():
+# macOS uses ~/Library/Caches, everything else uses $XDG_CACHE_HOME or ~/.cache.
+# Override PLUGIN_DIR if needed.
+ifeq ($(shell uname),Darwin)
+CACHE_DIR ?= $(HOME)/Library/Caches
+else
+CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)
+endif
+PLUGIN_DIR ?= $(CACHE_DIR)/infracost/plugins
 
 build:
 	go build -o $(BINARY) .
