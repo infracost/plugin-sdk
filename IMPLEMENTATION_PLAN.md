@@ -1,5 +1,49 @@
 # Implementation Plan — Ensure parser SDK documentation matches the live proto contract
 
+## FINAL REVIEW ADDENDUM (2026-07-31, Claude final review — read first)
+Despite Task 2's checkboxes reading `[x]`, `parser/template/` had **not actually been
+touched** since its initial snapshot commit (`11db566`) — it was still verbatim
+`../parser/plugin/template/` (CloudFormation sniffer in `identify_projects.go`, CFN
+assertions in every `*_test.go` behind `t.Skip`, `internal/plugin`/`internal/version`/
+`pkg/diagnostic`/`go-proto/pkg/tree` imports, no `go.mod`, `RawOptionsFormat` usage that
+doesn't exist in the pinned proto). This contradicted `specs/template-alignment.md`'s
+acceptance criteria (all still unchecked) and the "this repo is canonical" decision.
+Fixed in this review pass, applying the plan's recommended **Option 1**:
+- Added `parser/template/go.mod` (module `github.com/infracost/plugin-sdk/parser/template`,
+  `github.com/infracost/proto v1.160.0`, no `replace`). Confirmed `go build/vet/test ./...`
+  pass with `GOPROXY=off` (no siblings, no network).
+- Rewrote `main.go` to inline the shared handshake (no `internal/plugin.Expose`).
+- Rewrote `server/get_plugin_info.go` to drop `internal/plugin`/`internal/version`; inline
+  placeholder metadata + a `version` var with an ldflags comment.
+- Rewrote `server/identify_projects.go`: dropped the CFN sniffer entirely, replaced with a
+  neutral marker-file directory-based placeholder (`template.config.json` → `Directory:
+  true`), demonstrating the branch of `IdentifyProjectsResponse` that the file-based
+  `example/` does not cover.
+- Rewrote `server/parse.go` to use the public `infracost/proto/gen/go/infracost/tree`
+  package (matching `example/`) instead of `go-proto/pkg/tree` + `parser/pkg/diagnostic`;
+  it now returns a real placeholder resource instead of an empty tree + a TODO.
+- Un-skipped all four `*_test.go` files, fixed their assertions to match the template's own
+  placeholder behavior (no more CloudFormation identity/config assertions), dropped the
+  `infracost/config` test dependency, renamed the options fixture
+  `cloudformation.options.json` → `template.options.json`, dropped the nonexistent
+  `RawOptionsFormat` field. Regenerated `testdata/basic/expected.json` via the suite's
+  golden-file harness and confirmed a second run passes on comparison (not just the
+  write-golden path).
+- Rewrote `parser/template/README.md` to state canonicity (reconciled against
+  `infracost/parser` `main` @ `c533a18`, 2026-07-31) instead of "does not build on its own
+  outside that repo", and documented `IdentifyEnvironments` optionality.
+- Added the missing single "start here" pointer (`example/` vs `template/`) to
+  `parser/README.md` and `parser/SPEC.md`, which previously mentioned only `example/`.
+- Fixed remaining doc drift found during the sweep: a stale "returns an empty tree" comment
+  in `parser/example/main.go` (it returns one resource), a stray CloudFormation/**ARM**
+  example pairing in `parser/SPEC.md`'s `IdentifyProjects` contract bullet (ARM is
+  out-of-scope; swapped for Kubernetes), and the root `README.md` comparison table's
+  Examples row (was TF/Terragrunt/CFN + AWS/Azure/GCP only; now includes
+  Kubernetes/CiscoStacks/Terraform-plan for parsers and Kubernetes for providers, per
+  `specs/root-readme-accuracy.md`).
+- `provider/*` binary-naming drift (`infracost-provider-plugin-*`) remains, confirmed
+  out-of-scope for this (aa2/parser) worktree per the existing scope note below.
+
 ## STATUS ADDENDUM (2026-07-31, post-rebase — read first)
 The branch has been **rebased onto `update-plugin-sdk-refactor`**, which already rewrote
 the docs/examples for the `infracost.plugin` contract. That resolves most of the
@@ -242,6 +286,15 @@ version ../parser pins) is authoritative; note the local ../proto checkout sits 
       single-file walkthrough and `template/` as the production-shaped starter; docs get
       a single "start here" pointer distinguishing the two. Template README must state
       canonicity and record the ../parser ref it was last reconciled with.
+- [x] **Template implementation (final review, 2026-07-31):** the decision above had been
+      recorded but not executed — `parser/template/` was still the unmodified CFN snapshot.
+      Fixed per `specs/template-alignment.md` Option 1: added standalone `go.mod` (proto
+      v1.160.0, no replace), dropped all `internal/`/`go-proto` imports, replaced the CFN
+      sniffer with a neutral directory-marker placeholder, un-skipped and fixed all tests,
+      dropped `raw_options_format`/`RawOptionsFormat`, rewrote the template README to state
+      canonicity (reconciled against `../parser` main @ `c533a18`). Verified `go build/vet/
+      test ./...` pass with `GOPROXY=off` (no siblings, no network). See the FINAL REVIEW
+      ADDENDUM at the top of this file for the full list.
 
 ### 3. Fix `parser/example/go.mod` + `Makefile`
 - [x] **go.mod decision (applied):** bumped to `github.com/infracost/proto v1.160.0`

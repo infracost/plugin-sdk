@@ -10,7 +10,7 @@ Infracost has two types of plugins:
 | **Plugin type** | `GetPluginInfo` reports `PARSER` | `GetPluginInfo` reports `PROVIDER` |
 | **Services** | `PluginService` + `ParserService` | `PluginService` + `ProviderService` |
 | **RPCs** | GetPluginInfo · GetParserConfig · IdentifyProjects · IdentifyEnvironments *(optional)* · Parse | GetPluginInfo · Process · ListFinopsPolicies |
-| **Examples** | Terraform, Terragrunt, CloudFormation | AWS, Azure, GCP |
+| **Examples** | Terraform, Terragrunt, CloudFormation, Kubernetes, CiscoStacks, Terraform-plan | AWS, Azure, Google, Kubernetes |
 | **Use case** | "I have a new IaC format" | "I have a new cloud to price" |
 
 Every plugin implements `PluginService` (a single `GetPluginInfo` RPC that reports its type and metadata) plus one of `ParserService` / `ProviderService`. Both services share one gRPC handshake.

@@ -170,7 +170,7 @@ Inspects a single directory and reports which paths this plugin can parse. Calle
 - **Do not recurse.** Inspect only the entries directly inside `directory`; the CLI walks the tree and calls `IdentifyProjects` per directory.
 - Return an empty response (not an error) for directories you don't handle or can't read.
 - Identification must be fast. Avoid network calls.
-- Use `directory: true` for directory-oriented formats (Terraform, Terragrunt). Use `files` for file-oriented formats where each file is an independent project (CloudFormation, ARM).
+- Use `directory: true` for directory-oriented formats (Terraform, Terragrunt). Use `files` for file-oriented formats where each file is an independent project (CloudFormation, Kubernetes).
 
 ### IdentifyEnvironments (optional)
 
@@ -265,7 +265,7 @@ The CLI discovers plugins by scanning a plugin directory, which defaults to `os.
 
 Drop your built binary in that directory and run `infracost` against a project containing your format. The CLI will launch the binary, call `GetPluginInfo`, and route matching directories to it.
 
-Because the gRPC contract is plain Go, the most reliable way to test a plugin is with Go unit tests that call your service methods directly — see the `server/*_test.go` files alongside each reference plugin in the `infracost/parser` repo for the pattern (table-driven tests with `testdata/` fixtures).
+Because the gRPC contract is plain Go, the most reliable way to test a plugin is with Go unit tests that call your service methods directly — see [`template/server/*_test.go`](template/server) in this repo, or the equivalent files alongside each reference plugin in the `infracost/parser` repo, for the pattern (table-driven tests with `testdata/` fixtures).
 
 ## Constraints and Limits
 
@@ -284,4 +284,4 @@ See the per-IaC parser plugins in the `infracost/parser` repo for production exa
 - `plugin/ciscostacks/` — file-based, identifies Cisco Stacks templates
 - `plugin/terraform-plan/` — file-based, identification priority 10 (always wins over Terraform)
 
-For a minimal starting point, see the [`example/`](example) directory in this repo.
+For a minimal, single-file starting point, see [`example/`](example) in this repo. For a production-shaped starting point (one file per RPC, with tests), see [`template/`](template) — copy it directly to start a real plugin.

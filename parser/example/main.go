@@ -126,7 +126,7 @@ func (s *exampleService) IdentifyProjects(_ context.Context, req *pluginpb.Ident
 
 // Parse (ParserService) reads the IaC at req.Path and returns an IaC-agnostic
 // cost tree. A real plugin would build the tree from the parsed resources; this
-// example returns an empty tree.
+// example returns a single placeholder resource.
 func (s *exampleService) Parse(_ context.Context, req *pluginpb.ParseRequest) (*pluginpb.ParseResponse, error) {
 	if req.GetPath() == "" {
 		return nil, fmt.Errorf("path is required")

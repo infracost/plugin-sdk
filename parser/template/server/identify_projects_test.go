@@ -9,18 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIdentifyProjects_Basic(t *testing.T) {
-	t.Skip("template plugin — replace when implementing a real plugin")
-
+func TestIdentifyProjects(t *testing.T) {
 	svc := newTestClient(t)
 
-	resp, err := svc.IdentifyProjects(context.Background(), &pluginpb.IdentifyProjectsRequest{
-		Directory: "testdata/basic",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, resp)
+	tests := []struct {
+		name          string
+		dir           string
+		wantDirectory bool
+	}{
+		{"directory containing the marker file is claimed whole", "testdata/basic", true},
+		{"directory without the marker file returns an empty response", "testdata", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := svc.IdentifyProjects(context.Background(), &pluginpb.IdentifyProjectsRequest{
+				Directory: tc.dir,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, resp)
 
-	assert.False(t, resp.Directory, "expected testdata/basic not to be identified as a cloudformation project directory")
-	assert.Len(t, resp.Files, 1)
-	assert.Contains(t, resp.Files, "template.yml")
+			assert.Equal(t, tc.wantDirectory, resp.GetDirectory())
+			assert.Empty(t, resp.GetFiles(), "directory and files are mutually exclusive")
+		})
+	}
 }
