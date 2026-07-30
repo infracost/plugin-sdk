@@ -30,6 +30,69 @@ Tasks 1, 4, 5, 6 in their original form. **Residual work on the new base:**
      keep `parser/template/` here as canonical, clean it up, record the ../parser ref it
      was reconciled with; pointing ../parser's copy back here is a follow-up in that repo.
 
+## GAP-ANALYSIS REFRESH (2026-07-31, planning phase — verified against working tree)
+Re-verified every residual item in the STATUS ADDENDUM against the actual files. All
+still hold. Precise, confirmed current state:
+
+**parser/example/ (single-file, self-contained):**
+- `go.mod:7,12` — still `infracost/proto v1.34.0` + `replace => ../../../proto` (unresolvable
+  from this worktree → build/vet/test all fail). Fix: bump to tagged `v1.160.0`, drop replace,
+  drop the stale comment, `go mod tidy`.
+- `Makefile:3` — `BINARY = infracost-parser-plugin-example` (wrong `-plugin-` convention →
+  `infracost-parser-example`); no `test` target. `validate` already gone; `install` OK.
+- `main.go:137` — comment still says raw_options is "encoded as req.RawOptionsFormat"; the
+  field no longer exists (proto field 4 reserved). Reword to "always JSON". Code itself is
+  clean and on the correct contract. `Parse` returns an **empty** `tree.Tree{}` — spec wants
+  ≥1 provider→service→resource. No `_test.go` yet (needs one test per RPC, in-process).
+
+**parser/SPEC.md:**
+- Line 184 — `raw_options_format` row still in the Parse request table; line 217 — "with
+  raw_options_format = \"application/json\"". Remove both; state always-JSON.
+- No `### IdentifyEnvironments` section (service list at 31/108 omits it). Add full section.
+- No `raw_options` lifecycle section. Priority values (0/1/10) and architecture prose are OK.
+
+**parser/README.md:** clean of forbidden strings BUT interface-contract table (42–52) omits
+`IdentifyEnvironments (optional)`; build snippet (line 24) uses `infracost-parser-plugin-example`.
+
+**README.md (root):** discovery/handshake/naming prose is correct, but three concrete drifts —
+line 12 RPC row omits `IdentifyEnvironments (optional)`; line 35 uses
+`infracost-parser-plugin-<name>` / `infracost-provider-plugin-<name>`; line 66 `go build -o
+infracost-parser-plugin-myformat`. Examples row lists only TF/Terragrunt/CFN + AWS/Azure/GCP
+(spec wants Kubernetes/CiscoStacks/Terraform-plan added, ARM stays out).
+
+**parser/template/ — the largest residual, and it hides an unresolved design tension:**
+Confirmed defects: `identify_projects.go` is verbatim CFN sniffer; `get_plugin_info.go:6-7`
+imports `infracost/parser/internal/{plugin,version}`; `get_plugin_info_test.go:13,21` has
+`t.Skip` + asserts `"infracost/cloudformation"`; `parse_test.go:20,85,95` has `t.Skip`, reads
+`cloudformation.options.json`, sets `RawOptionsFormat`; `parse.go:7-9` imports
+`infracost/go-proto/pkg/tree` + `infracost/parser/pkg/diagnostic`; README frames the copy as a
+*downstream snapshot of ../parser* (opposite of the decided canonical direction) and cites
+`raw_options_format` (54) + a `TreeInput.raw_options` provider channel (57-58) that the proto
+lacks. There is **no `go.mod`**.
+
+## OPEN DECISION (blocks template-alignment acceptance) — needs resolution before/at build
+`template-alignment.md` requires "Template tests pass (`go test ./...`) without `t.Skip`", but
+the template currently **cannot compile standalone**: it has no `go.mod` and imports three
+../parser-internal packages (`internal/plugin`, `internal/version`, `pkg/diagnostic`) plus
+`infracost/go-proto/pkg/tree`. These are unreachable from a fresh clone with no siblings. You
+cannot both (a) keep the template a faithful in-repo mirror of ../parser's `plugin/template`
+(internal deps, no module) AND (b) have its tests build+pass here. Options:
+  1. **Make the template a standalone module** — add `go.mod` (proto `v1.160.0`, no replace),
+     drop the internal imports: inline metadata constants for `plugin.URL/Author/version`,
+     replace `go-proto/pkg/tree`+`pkg/diagnostic` usage with the public
+     `infracost/proto/gen/go/infracost/tree` types the example already uses. Then un-skip and
+     fix the CFN test assertions → real passing tests. (Diverges from ../parser's copy, but the
+     decision says *this* repo is canonical, so ../parser becomes the downstream that adapts.)
+  2. **Keep it non-buildable** and satisfy the spec via the self-contained `example/` tests
+     only, explicitly recording in the template README that the template is a structural
+     reference whose tests run once copied into a module. This contradicts the literal
+     acceptance criterion, so it must be a stated, signed-off deviation.
+Recommend **Option 1** — it is the only path that satisfies the acceptance criterion and the
+"this repo is canonical" decision simultaneously; the internal helpers it drops are trivial
+(two string consts + a version var + swapping to the already-used public tree package).
+Whichever is chosen, the template README must be rewritten to declare canonicity and record the
+../parser ref it was reconciled against (its git status is unchanged from the snapshot commit).
+
 ## Context
 The parser SDK docs and example describe an invented 5-RPC interface
 (`Describe, Detect, Initialize, Parse, ParseToTree` with `DetectConfidence`,
