@@ -4,6 +4,7 @@
 Defines what "the actual implementation" means for all documentation-accuracy work in this repo. The SDK docs must be verified against a single, explicit baseline, because the sibling repos contain multiple generations of the plugin contract and several unmerged branches that describe abandoned designs.
 
 ## Requirements
+- **Repository scope (decided):** review and correct both plugin types. In-scope surfaces are the root README; parser README, specification, example, and template; provider README, specification, and example; and shared discovery, naming, handshake, command, and testing guidance.
 - **Doc base (decided):** this branch is rebased onto `update-plugin-sdk-refactor`, whose rewritten docs/examples/template are the working baseline. The remaining work is drift correction on top of it, not a rewrite: removing `raw_options_format` (dropped from the proto; `raw_options` is always JSON), documenting `IdentifyEnvironments`, dropping the nonexistent `TreeInput.raw_options` provider-options channel unless the tagged proto has it, refreshing go.mod pins, and template cleanup.
 - **Sibling-repo authority (decided):** `origin/main` (or `master` where that is the default) of each sibling repo — ../cli, ../proto, ../parser, ../providers, ../config — is assumed to be the correct, working implementation. Do not build sibling repos to verify behavior; verify doc claims by reading their code. Local checkouts may sit on feature branches (e.g. ../proto on `feature/arm-plugin-architecture`); claims must be checked against `origin/main`, not the local branch state.
 - The wire-contract reference is the tagged `github.com/infracost/proto` release that ../parser pins (v1.160.0), whose `gen/go/infracost/plugin` package is what examples build against.
@@ -13,9 +14,10 @@ Defines what "the actual implementation" means for all documentation-accuracy wo
 - **Planned CLI tooling (decided):** `infracost plugin validate` and `infracost plugin add` are wanted and now tracked in the CLI project as issues `cli-b10` and `cli-6f8`. Until they ship, SDK docs must not present them as existing; a clearly-labeled future-work note referencing the issues is acceptable.
 
 ## Acceptance Criteria
+- [ ] Parser and provider documentation, examples, and shared root guidance are all included in the implementation review.
 - [ ] A written baseline note (in the implementation plan or a doc appendix) records which repo/branch/version each doc claim was verified against, with sibling repos checked at `origin/main`/`master`.
 - [ ] No SDK doc references `Describe`, `Detect`, `Initialize`, `ParseToTree`, `ProcessTree`, `ListSupportedResources`, `DetectConfidence`, `plugins.infracost.io`, `INFRACOST_PARSER_PLUGIN_MAGIC_COOKIE`, or `INFRACOST_PROVIDER_PLUGIN_MAGIC_COOKIE` as current behavior.
-- [ ] Docs describe only RPCs, messages, and fields present in the tagged `github.com/infracost/proto` release the examples build against (v1.160.0+), verified against that module's `gen/go` output, not the local ../proto working tree.
+- [ ] Docs describe only RPCs, messages, and fields present in the tagged `github.com/infracost/proto` v1.160.0 release, verified against that module's `gen/go` output rather than the local ../proto working tree.
 - [ ] `plugin validate`/`plugin add` appear only as future work referencing `cli-b10`/`cli-6f8`, if at all.
 
 ## Edge Cases

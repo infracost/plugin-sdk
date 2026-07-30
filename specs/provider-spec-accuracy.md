@@ -29,4 +29,5 @@
 ## Dependencies
 - [implementation-baseline](implementation-baseline.md)
 - [handshake-documentation](handshake-documentation.md)
-- [discovery-and-naming-documentation](discovery-and-naming-documentation.md)
+- [plugin-discovery-documentation](plugin-discovery-documentation.md)
+- [plugin-naming-documentation](plugin-naming-documentation.md)

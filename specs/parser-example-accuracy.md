@@ -16,7 +16,8 @@
 - [ ] `go vet` and `go test ./...` pass; at least one test exercises each implemented RPC in-process.
 - [ ] The example's handshake constants and dispense key match the CLI's (`INFRACOST_PLUGIN` / `de8c7e96-…` / `"plugin"`).
 - [ ] No references to `Describe`, `Detect`, `DetectConfidence`, `Initialize`, `ParseToTree`, or cloudformation-result shims remain.
-- [ ] A binary built from the example is loadable by the CLI (appears in `infracost plugin list` when dropped in the plugin dir), or the reason it cannot be (if any) is documented.
+- [ ] The in-process gRPC test proves the binary's service contract is dispensable under key `"plugin"`, and the README documents how to verify it with `infracost plugin list`.
+- [ ] If a compatible `infracost` binary is already installed, the example is smoke-tested through `plugin list`; absence of such a binary does not fail acceptance.
 
 ## Edge Cases
 - Proto tag availability is resolved: v1.160.0 publishes `infracost.plugin` (it's what ../parser builds against). If a newer field the docs need is absent from the tag, flag it rather than reintroducing a replace directive.

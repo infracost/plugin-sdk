@@ -17,7 +17,8 @@
 - [ ] `go test ./...` passes with at least one in-process test per implemented RPC.
 - [ ] Handshake constants and dispense key match the CLI's.
 - [ ] No references to `Describe`, `ListSupportedResources`, `ProcessTree`, or `plugins.infracost.io` remain.
-- [ ] A binary built from the example is loadable by the CLI (appears in `infracost plugin list`), or the blocker is documented.
+- [ ] The in-process gRPC test proves the binary's service contract is dispensable under key `"plugin"`, and the README documents how to verify it with `infracost plugin list`.
+- [ ] If a compatible `infracost` binary is already installed, the example is smoke-tested through `plugin list`; absence of such a binary does not fail acceptance.
 
 ## Edge Cases
 - The example receives the full tree including other clouds' resources (the CLI sends the tree to every provider); it should show returning only what it prices and ignoring the rest, like the official plugins' prune-by-provider-key behavior.
