@@ -26,4 +26,5 @@ The top-level `README.md` is the SDK's front door. Its comparison table, naming 
 - [parser-spec-accuracy](parser-spec-accuracy.md)
 - [provider-spec-accuracy](provider-spec-accuracy.md)
 - [cli-commands-documentation](cli-commands-documentation.md)
-- [discovery-and-naming-documentation](discovery-and-naming-documentation.md)
+- [plugin-discovery-documentation](plugin-discovery-documentation.md)
+- [plugin-naming-documentation](plugin-naming-documentation.md)
