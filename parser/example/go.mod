@@ -4,12 +4,9 @@ go 1.25.5
 
 require (
 	github.com/hashicorp/go-plugin v1.7.0
-	github.com/infracost/proto v1.34.0
+	github.com/infracost/proto v1.160.0
 	google.golang.org/grpc v1.79.3
 )
-
-// Local development — remove once the infracost.plugin protos are in a tagged proto release.
-replace github.com/infracost/proto => ../../../proto
 
 require (
 	github.com/fatih/color v1.13.0 // indirect

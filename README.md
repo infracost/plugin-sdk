@@ -9,7 +9,7 @@ Infracost has two types of plugins:
 | **Purpose** | Extract resources from IaC files into a cost tree | Price the cost tree and apply policies |
 | **Plugin type** | `GetPluginInfo` reports `PARSER` | `GetPluginInfo` reports `PROVIDER` |
 | **Services** | `PluginService` + `ParserService` | `PluginService` + `ProviderService` |
-| **RPCs** | GetPluginInfo · GetParserConfig · IdentifyProjects · Parse | GetPluginInfo · Process · ListFinopsPolicies |
+| **RPCs** | GetPluginInfo · GetParserConfig · IdentifyProjects · IdentifyEnvironments *(optional)* · Parse | GetPluginInfo · Process · ListFinopsPolicies |
 | **Examples** | Terraform, Terragrunt, CloudFormation | AWS, Azure, GCP |
 | **Use case** | "I have a new IaC format" | "I have a new cloud to price" |
 
@@ -32,7 +32,7 @@ The plugin directory defaults to `os.UserCacheDir()/infracost/plugins`:
 - macOS: `~/Library/Caches/infracost/plugins`
 - Windows: `%LocalAppData%\infracost\plugins`
 
-A descriptive binary name such as `infracost-parser-plugin-<name>` or `infracost-provider-plugin-<name>` is conventional and recommended for clarity, but it is not required for discovery.
+A descriptive binary name such as `infracost-parser-<name>` or `infracost-provider-<name>` is conventional and recommended for clarity, but it is not required for discovery.
 
 ## Plugin naming
 
@@ -63,7 +63,7 @@ The dispense key is always `"plugin"`, and both `PluginService` and the relevant
 
 ```bash
 # From an example directory
-go build -o infracost-parser-plugin-myformat .
+go build -o infracost-parser-myformat .
 
 # Install it where the CLI discovers plugins (see "How plugins are discovered")
 make install

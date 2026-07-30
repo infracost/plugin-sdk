@@ -1,7 +1,7 @@
-// infracost-parser-plugin-example is a minimal parser plugin that demonstrates
-// the full plugin interface contract. It identifies ".example" files in a
-// directory and returns an empty cost tree for each one. Use this as a starting
-// point for new parser plugins.
+// infracost-parser-example is a minimal parser plugin that demonstrates the full
+// plugin interface contract. It identifies ".example" files in a directory and
+// returns a minimal cost tree for each one. Use this as a starting point for new
+// parser plugins.
 package main
 
 import (
@@ -63,7 +63,7 @@ func (p *examplePlugin) GRPCServer(_ *goplugin.GRPCBroker, g *grpc.Server) error
 	return nil
 }
 
-func (p *examplePlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
+func (p *examplePlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (any, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -133,10 +133,25 @@ func (s *exampleService) Parse(_ context.Context, req *pluginpb.ParseRequest) (*
 	}
 
 	// req.GenericOptions carries IaC-agnostic settings (working directory,
-	// dependency requests, etc.). Plugin-specific options arrive as raw bytes
-	// in req.RawOptions, encoded as req.RawOptionsFormat (e.g. "application/json").
+	// dependency requests, etc.). Plugin-specific options arrive as JSON bytes
+	// in req.RawOptions (always JSON; proto field 4 is reserved and dropped).
 
 	return &pluginpb.ParseResponse{
-		Tree: &tree.Tree{},
+		Tree: &tree.Tree{
+			Providers: map[string]*tree.Provider{
+				"example": {
+					Services: map[string]*tree.Service{
+						"example": {
+							Resources: []*tree.Resource{
+								{
+									Id:   req.GetPath(),
+									Type: "example_resource",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}, nil
 }
