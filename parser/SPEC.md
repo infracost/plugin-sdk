@@ -34,7 +34,7 @@ Both services are registered on the same gRPC server (see [Handshake](#go-plugin
 
 ## Plugin Identity and Naming
 
-The CLI **does not** infer a plugin's type or identity from its binary filename. It launches every executable in the plugin directory, calls `GetPluginInfo`, and uses the returned `type` to decide whether the binary is a parser or a provider. Binaries that fail to launch or handshake are skipped.
+The CLI **does not** infer a plugin's type or identity from its binary filename. It launches every executable in the plugin directory, calls `GetPluginInfo`, and uses the returned `type` to decide whether the binary is a parser or a provider. Binaries that fail to launch or handshake are **skipped** (logged at debug level, not fatal). A duplicate `(name, type)` pair is **fatal** — the CLI kills all already-loaded plugins and exits with an error.
 
 A descriptive binary name such as `infracost-parser-<format>` is conventional and recommended for clarity, but it is not required for discovery.
 
@@ -43,7 +43,7 @@ The `name` returned by `GetPluginInfo` is the plugin's identity. By convention i
 - Official plugins use the `infracost/` namespace, e.g. `infracost/terraform`, `infracost/cloudformation`.
 - Community plugins should use their own namespace, e.g. `acme/crossplane`.
 
-Names must be unique across all installed plugins.
+Names must be unique **within a type** — a parser and a provider may report the same name (e.g. `infracost/kubernetes`) without conflict.
 
 ## go-plugin Handshake
 
@@ -265,14 +265,30 @@ The CLI discovers plugins by scanning a plugin directory, which defaults to `os.
 
 Drop your built binary in that directory and run `infracost` against a project containing your format. The CLI will launch the binary, call `GetPluginInfo`, and route matching directories to it.
 
+Run `infracost plugin list` to verify the binary is visible and reporting the expected name and version.
+
+### Environment variable overrides
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `INFRACOST_CLI_PLUGIN_DIR` | *(cache dir)* | Load plugins from this directory instead of the cache (downloads skipped; for local development). |
+| `INFRACOST_CLI_PLUGIN_CACHE_DIRECTORY` | `os.UserCacheDir()/infracost/plugins` | Download location for managed plugins. |
+| `INFRACOST_CLI_PLUGIN_AUTO_UPDATE` | `true` | Set to `false` to disable automatic updates. |
+
 Because the gRPC contract is plain Go, the most reliable way to test a plugin is with Go unit tests that call your service methods directly — see [`template/server/*_test.go`](template/server) in this repo, or the equivalent files alongside each reference plugin in the `infracost/parser` repo, for the pattern (table-driven tests with `testdata/` fixtures).
 
 ## Constraints and Limits
 
 - **Max gRPC message size**: 64 MB (both send and receive)
+- **Plugin start timeout**: 60 s (Linux/macOS), 180 s (Windows). The plugin must serve the handshake within this window or the CLI kills the process and skips it.
+- **`GetPluginInfo` query timeout**: 30 s. Called during install/update to read the installed version; also called at discovery on every startup.
 - **Identification**: must be fast and side-effect free; avoid network calls
 - **Binary size**: no hard limit, but aim for fast downloads
 - **Concurrency**: the CLI may run plugins in parallel; plugins are separate processes, so keep any shared on-disk state (caches) concurrency-safe
+
+### Diagnosing discovery failures
+
+If `infracost plugin list` doesn't show your binary, re-run infracost with `--log-level debug` (or set `LOG_LEVEL=debug`). The CLI logs a skip reason for each binary it rejects. Common causes: binary not executable (`chmod +x`), wrong handshake constants, or startup timeout exceeded. The CLI propagates `LOG_LEVEL` to the plugin subprocess, so your plugin's own logger will emit debug output at the same level.
 
 ## Reference Implementations
 
