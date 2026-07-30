@@ -28,7 +28,7 @@ Plugins are standalone binaries that communicate with the Infracost CLI over gRP
 Every plugin implements two gRPC services:
 
 - **`PluginService`** — a single `GetPluginInfo` RPC that reports the plugin's type and metadata. This is how the CLI tells parser plugins apart from provider plugins.
-- **`ParserService`** — the parsing RPCs (`GetParserConfig`, `IdentifyProjects`, `Parse`).
+- **`ParserService`** — the parsing RPCs (`GetParserConfig`, `IdentifyProjects`, `IdentifyEnvironments`, `Parse`).
 
 Both services are registered on the same gRPC server (see [Handshake](#go-plugin-handshake)).
 
@@ -36,7 +36,7 @@ Both services are registered on the same gRPC server (see [Handshake](#go-plugin
 
 The CLI **does not** infer a plugin's type or identity from its binary filename. It launches every executable in the plugin directory, calls `GetPluginInfo`, and uses the returned `type` to decide whether the binary is a parser or a provider. Binaries that fail to launch or handshake are skipped.
 
-A descriptive binary name such as `infracost-parser-plugin-<format>` is conventional and recommended for clarity, but it is not required for discovery.
+A descriptive binary name such as `infracost-parser-<format>` is conventional and recommended for clarity, but it is not required for discovery.
 
 The `name` returned by `GetPluginInfo` is the plugin's identity. By convention it is `<namespace>/<name>`:
 
@@ -106,6 +106,7 @@ service PluginService {
 service ParserService {
     rpc GetParserConfig(GetParserConfigRequest) returns (GetParserConfigResponse);
     rpc IdentifyProjects(IdentifyProjectsRequest) returns (IdentifyProjectsResponse);
+    rpc IdentifyEnvironments(IdentifyEnvironmentsRequest) returns (IdentifyEnvironmentsResponse); // optional
     rpc Parse(ParseRequest) returns (ParseResponse);
 }
 ```
@@ -163,12 +164,31 @@ Inspects a single directory and reports which paths this plugin can parse. Calle
 | `directory` | bool | `true` if the whole directory is a single project of this format. Mutually exclusive with `files`. |
 | `files` | string[] | Individual files in the directory that are each a project in their own right (paths relative to `directory`). Must be empty if `directory` is `true`. |
 | `dependency_paths` | string[] | Paths (relative to `directory`) that this project depends on. Optional. |
+| `raw_options` | bytes (JSON) | Seed options blob for this project, owned by the plugin. The CLI persists this in the config file and passes it back verbatim in subsequent `ParseRequest.raw_options` calls. |
 
 **Contract:**
 - **Do not recurse.** Inspect only the entries directly inside `directory`; the CLI walks the tree and calls `IdentifyProjects` per directory.
 - Return an empty response (not an error) for directories you don't handle or can't read.
 - Identification must be fast. Avoid network calls.
 - Use `directory: true` for directory-oriented formats (Terraform, Terragrunt). Use `files` for file-oriented formats where each file is an independent project (CloudFormation, ARM).
+
+### IdentifyEnvironments (optional)
+
+Refines a project identified by `IdentifyProjects` into one or more named environments (e.g., Terraform workspaces or variable-file sets). This RPC is **optional** — if your plugin does not support environments, return `codes.Unimplemented` and the CLI will treat the project as a single default environment. This is distinct from returning an empty list, which means the project has zero environments and will not be parsed.
+
+**Request:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `directory` | string | Absolute path to the project directory. |
+| `attributed_files` | AttributedVarFile[] | Variable files attributed to this project by the Terraform/Terragrunt autodetect flow. Provided as a migration aid — non-Terraform/Terragrunt plugins should ignore this field. |
+| `raw_options` | bytes (JSON) | Options blob seeded by `IdentifyProjects`. |
+
+**Response:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `environments` | Environment[] | List of environments for this project. Each `Environment` has a `name`, `path`, `files[]`, `dependency_paths[]`, and `raw_options` (refined per-environment). |
 
 ### Parse
 
@@ -180,8 +200,7 @@ Parses the IaC at the given path and returns an IaC-agnostic cost tree.
 |-------|------|-------------|
 | `path` | string | Absolute path to the project file or directory to parse. |
 | `generic_options` | GenericOptions | IaC-agnostic options: working/repo directories, cache settings, credential sets, an optional `dependency_request`, etc. See `infracost/parser/options/options.proto`. |
-| `raw_options` | bytes | Plugin-specific options, encoded however your plugin chooses. |
-| `raw_options_format` | string | The encoding of `raw_options`, e.g. `"application/json"`. Document the format your plugin expects. |
+| `raw_options` | bytes (JSON) | Plugin-specific options. **Always JSON** (proto field 4 is reserved and dropped). The schema is owned by the plugin; document what your plugin expects. |
 
 **Response:**
 
@@ -210,11 +229,22 @@ Tree
 
 The wire format is generated from `infracost/tree/tree.proto`. The proto comments recommend building it with the `tree` package's `ToProto()` / `FromProto()` helpers rather than constructing the protobuf messages by hand where those helpers are available to you.
 
+## `raw_options` lifecycle
+
+`raw_options` is the channel through which a plugin seeds, refines, and receives its own format-specific configuration:
+
+1. **`IdentifyProjects`** — the plugin returns a `raw_options` blob (JSON) alongside the identified paths. This is the initial seed, e.g. `{"vars_file": "prod.tfvars"}`.
+2. **`IdentifyEnvironments`** (optional) — the plugin refines the seed per environment; each returned `Environment` carries its own `raw_options`.
+3. **Config file** — the CLI persists the blob as a readable YAML map in the project's `infracost.yml` (or equivalent). Users can edit it; the CLI reads it back on subsequent runs.
+4. **`Parse`** — the CLI passes the current blob verbatim as `ParseRequest.raw_options` (always JSON). The plugin parses it and uses it to configure the parse.
+
+`raw_options` is always JSON — proto field 4 is reserved and dropped. The schema is entirely owned by the plugin; document it in your plugin's README.
+
 ## Adding a New Format
 
 To add support for a completely new IaC format:
 
-1. **Decide how options are passed.** Most plugins accept their format-specific options as JSON in `ParseRequest.raw_options` with `raw_options_format = "application/json"`, which avoids changing the proto repo. Document the shape you expect.
+1. **Decide how options are passed.** Pass format-specific options as JSON in `ParseRequest.raw_options` — no proto changes needed. Document the JSON schema your plugin expects.
 
 2. **Build the plugin binary:**
    - Create a `main.go` that serves `PluginService` + `ParserService` over the handshake above.
@@ -250,5 +280,8 @@ See the per-IaC parser plugins in the `infracost/parser` repo for production exa
 - `plugin/terraform/` — directory-based, identifies whole directories
 - `plugin/terragrunt/` — directory-based, higher identification priority than Terraform
 - `plugin/cloudformation/` — file-based, content-sniffs `.json`/`.yaml`/`.yml`
+- `plugin/kubernetes/` — file-based, identifies Kubernetes manifests
+- `plugin/ciscostacks/` — file-based, identifies Cisco Stacks templates
+- `plugin/terraform-plan/` — file-based, identification priority 10 (always wins over Terraform)
 
 For a minimal starting point, see the [`example/`](example) directory in this repo.

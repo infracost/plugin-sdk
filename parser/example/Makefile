@@ -1,6 +1,6 @@
-.PHONY: build install clean
+.PHONY: build test install clean
 
-BINARY = infracost-parser-plugin-example
+BINARY = infracost-parser-example
 
 # Where the Infracost CLI discovers plugins. This mirrors Go's os.UserCacheDir():
 # macOS uses ~/Library/Caches, everything else uses $XDG_CACHE_HOME or ~/.cache.
@@ -14,6 +14,9 @@ PLUGIN_DIR ?= $(CACHE_DIR)/infracost/plugins
 
 build:
 	go build -o $(BINARY) .
+
+test:
+	go test ./...
 
 # Install the plugin where the CLI can find it. The CLI launches every binary
 # in the plugin directory and calls GetPluginInfo to determine its type, so the

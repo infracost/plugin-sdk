@@ -20,7 +20,7 @@ The CLI discovers plugins by launching every binary in its plugin directory and 
 
 ```bash
 cd example
-go build -o infracost-parser-plugin-example .
+go build -o infracost-parser-example .
 ```
 
 ### Install it where the CLI can find it
@@ -49,6 +49,7 @@ Your plugin implements two gRPC services:
 |-----|---------|
 | **GetParserConfig** | Report identification priority and project-type mapping |
 | **IdentifyProjects** | Report which paths in a directory this plugin can parse (no recursion) |
+| **IdentifyEnvironments** *(optional)* | Refine a project into named environments; return `codes.Unimplemented` if not supported |
 | **Parse** | Parse a path into an IaC-agnostic `tree.Tree` |
 
 Both services are registered on the same gRPC server using a shared handshake. See [SPEC.md](SPEC.md) for the full specification, including the handshake, message formats, priority semantics, and the cost-tree structure.
