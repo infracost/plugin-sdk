@@ -1,5 +1,35 @@
 # Implementation Plan — Ensure parser SDK documentation matches the live proto contract
 
+## STATUS ADDENDUM (2026-07-31, post-rebase — read first)
+The branch has been **rebased onto `update-plugin-sdk-refactor`**, which already rewrote
+the docs/examples for the `infracost.plugin` contract. That resolves most of the
+"Verified current-state gaps" below (they described the old spike base) and most of
+Tasks 1, 4, 5, 6 in their original form. **Residual work on the new base:**
+
+1. `raw_options_format` no longer exists in the proto (`ParseRequest` field 4 reserved;
+   `raw_options` is always JSON). Remove it from: `parser/SPEC.md` (2×),
+   `parser/template/README.md`, `parser/template/options/options.go`,
+   `parser/template/server/parse.go` (+ `provider/SPEC.md` 2×, see scope note).
+2. `IdentifyEnvironments` is missing everywhere — add to `parser/SPEC.md` (full RPC
+   section incl. Unimplemented-vs-empty semantics and `attributed_files` caveat),
+   `parser/README.md` RPC table, root README parser RPC row, template docs.
+3. `IdentifyProjectsResponse.raw_options` (seed blob) and the raw_options lifecycle
+   (identify → environments → config YAML → ParseRequest, always JSON) are undocumented.
+4. Both examples' `go.mod` still pin proto `v1.34.0` with the broken
+   `replace ../../../proto` — bump to **v1.160.0**, drop replace (Open decision 1: RESOLVED).
+5. Example tests per Task 2 still needed; template has CFN copy-paste defects
+   (`identify_projects.go` sniffer, CFN test assertions, `parse_test.go` reading
+   `cloudformation.options.json`) and `t.Skip`-guarded tests.
+6. **Decisions from the user (2026-07-31):**
+   - Sibling repos: assume `origin/main` (or `master`) is correct and working; verify by
+     reading code, do NOT build sibling repos.
+   - `plugin validate` / `plugin add` WILL be added to the CLI — tracked as issues
+     **cli-b10** and **cli-6f8** in ../cli's tracker. Docs may reference them only as
+     clearly-labeled future work citing those issues.
+   - **This repo is the canonical template source** (reverses Task 2's recommendation):
+     keep `parser/template/` here as canonical, clean it up, record the ../parser ref it
+     was reconciled with; pointing ../parser's copy back here is a follow-up in that repo.
+
 ## Context
 The parser SDK docs and example describe an invented 5-RPC interface
 (`Describe, Detect, Initialize, Parse, ParseToTree` with `DetectConfidence`,
@@ -22,9 +52,12 @@ shared handshake **are** corrected here, and a provider-worktree follow-up is no
 where a provider-only file would need the same fix.
 
 ## Source of truth (verified 2026-07-31)
-All claims verified against the local sibling checkouts. Proto ground truth lives at
-`/Users/gg/Development/infracost/proto` (branch `feature/arm-plugin-architecture`;
-must also hold on the tagged release ../cli and ../parser consume, v1.159.0+).
+Claims below were gathered from the local sibling checkouts. **Policy (user decision):
+`origin/main` (or `master`) of each sibling repo is assumed correct and working — verify
+by reading code at that ref, do not build sibling repos.** For the wire contract, the
+tagged release the examples build against (`github.com/infracost/proto` v1.160.0, the
+version ../parser pins) is authoritative; note the local ../proto checkout sits on
+`feature/arm-plugin-architecture`, so re-check any claim sourced there against the tag.
 
 - `plugin/plugin.proto` — **`PluginService.GetPluginInfo`** →
   `GetPluginInfoResponse{ type(PluginType: PLUGIN_TYPE_UNKNOWN=0, PARSER=1, PROVIDER=2), name, version, description, url, author }`.
@@ -55,29 +88,60 @@ must also hold on the tagged release ../cli and ../parser consume, v1.159.0+).
 - `infracost.provider` legacy `ProcessTree`: not served/dialed.
 
 ## Verified current-state gaps (what's wrong today)
-- **README.md (root):** wrong RPC rows; per-type magic-cookie row; binary naming
-  `infracost-parser-plugin-<name>` (wrong — real is `infracost-parser-<key>`, no
-  `-plugin-`); `plugins.infracost.io` registry/canonical-name table; ARM listed /
-  Kubernetes+Terragrunt+CiscoStacks+Terraform-plan missing; `plugin validate` +
-  `plugin add` examples (neither command exists).
-- **parser/SPEC.md:** entirely the abandoned design — Describe/Detect/Initialize/
-  ParseToTree, DetectConfidence, `file_extensions`/`supports_directories`,
-  registry/canonical names, `-debug` suffix, per-type cookie
-  `INFRACOST_PARSER_PLUGIN_MAGIC_COOKIE`/`ac92b06c592f`, priority bands 1-19/20-39/40+
-  and values 10/25/30, `kubernetes_supported_resources`, `<100ms` detection & `10s`
-  startup limits, `cmd/…` + ARM reference paths, `plugin validate`/`--fixture`.
-- **parser/README.md:** five-RPC table, Describe/Detect quick-start, `plugin validate`
-  + `--fixture` validation section, ARM mention, filename-pattern discovery claim.
-- **parser/example/main.go:** imports `infracost/parser/api` +
-  `parser/cloudformation` + `parser/options`; implements Describe/Detect/Initialize/
-  Parse/ParseToTree; returns CloudFormation oneof; uses per-type cookie. Does not
-  compile against the current proto (undefined `api.DescribeRequest` etc.).
-- **parser/example/go.mod:** `infracost/proto v1.34.0` + stale "remove once the
-  Describe/Detect RPCs are in a tagged proto release" comment + `replace … => ../../../proto`
-  (path does **not** resolve from this worktree — confirmed `ls ../../../proto` fails;
-  the real proto is `/Users/gg/Development/infracost/proto`).
-- **parser/example/Makefile:** `validate` target invokes the nonexistent
-  `infracost plugin validate`; no `test` target.
+
+> **Refreshed 2026-07-31 (gap-analysis phase).** A prior session already did most of
+> the destructive rewrite: the example `main.go`, the SPEC/README structure, and the
+> root README's discovery/naming/handshake prose are now on the correct
+> `infracost.plugin` contract (no `Describe`/`Detect`/`Initialize`/`ParseToTree`/
+> `cloudformation`/`parser/api`/registry/per-type-cookie remnants). The bullets below
+> record only what is **still wrong today**, verified against the working tree.
+
+### Still broken — must fix in the implementation phase
+- **parser/example/go.mod (BLOCKS build/vet/test):** still `github.com/infracost/proto
+  v1.34.0` + `replace github.com/infracost/proto => ../../../proto`, which **does not
+  resolve** from this worktree → `go build/vet/test ./...` all fail with "replacement
+  directory ../../../proto does not exist". Apply the RESOLVED decision: bump to the
+  tagged `v1.160.0` (confirmed present in `../parser/go.mod` and `../parser/go.sum`),
+  drop the `replace`, drop the stale "remove once the infracost.plugin protos are in a
+  tagged proto release" comment, `go mod tidy`.
+- **parser/example/Makefile:** `BINARY = infracost-parser-plugin-example` uses the wrong
+  `-plugin-` convention → should be `infracost-parser-example`. `validate` target is
+  already gone and `install` is correct, but there is **no `test` target** — add
+  `test: go test ./...`.
+- **parser/SPEC.md — `raw_options_format`:** still referenced in the Parse request table
+  (line ~184) and the "Adding a New Format" step (line ~217). Remove the field row and
+  the `with raw_options_format = "application/json"` phrasing; state that `raw_options`
+  is **always JSON** and proto field 4 (`raw_options_format`) is reserved/dropped.
+- **parser/SPEC.md — missing `### IdentifyEnvironments`:** the service now documents
+  GetPluginInfo/GetParserConfig/IdentifyProjects/Parse but omits the optional
+  `IdentifyEnvironments` RPC. Add a section: optional; `codes.Unimplemented` vs
+  empty-list semantics; `attributed_files` = Terraform/Terragrunt migration aid (others
+  ignore); `environments[]` (Environment{name,path,files,dependency_paths,raw_options}).
+- **README.md (root) — binary naming:** line ~35 (`infracost-parser-plugin-<name>` /
+  `infracost-provider-plugin-<name>`) and line ~66 (`go build -o
+  infracost-parser-plugin-myformat`) still carry the wrong `-plugin-` segment → real is
+  `infracost-parser-<key>` / `infracost-provider-<key>`.
+- **README.md (root) — comparison table RPC row (line ~12):** parser column reads
+  `GetPluginInfo · GetParserConfig · IdentifyProjects · Parse` — **missing
+  `IdentifyEnvironments (optional)`**. Add it. (Provider column `GetPluginInfo · Process
+  · ListFinopsPolicies` is correct; the shared-cookie/naming/registry cleanup the plan
+  called for is already done.)
+
+### Verify during implementation (structure looks correct; confirm details)
+- **parser/example/main.go:** correct proto import + shared handshake; relies on
+  `UnimplementedParserServiceServer` so `IdentifyEnvironments` auto-returns
+  `codes.Unimplemented` (a valid "no env support"). Optional: add a one-line comment
+  making that intentional (Task 1). No test file / `server/` split yet — see Task 2
+  decision (link-to-template vs minimal example).
+- **parser/SPEC.md GetParserConfig:** confirm the body cites real priority values
+  (tf/cfn/k8s/ciscostacks 0, terragrunt 1, terraform-plan 10) and that
+  `generic_options` path `infracost/parser/options/options.proto` is correct.
+- **parser/README.md:** no forbidden strings; confirm the interface-contract table
+  lists `IdentifyEnvironments` as optional (Task 5) and the "start here" pointer is
+  single/unambiguous.
+- **README.md (root):** confirm the comparison table (if still present) has correct RPC
+  rows, the single shared `INFRACOST_PLUGIN` cookie, and Kubernetes-in/ARM-out examples;
+  and that `plugin validate`/`plugin add` are absent (Task 6).
 
 ## Tasks
 
@@ -110,10 +174,12 @@ must also hold on the tagged release ../cli and ../parser consume, v1.159.0+).
       `TestPluginGRPCConn` dispensing `"plugin"`. Tests must **pass** (not `t.Skip`) and
       cover each implemented RPC. No CloudFormation copy-paste (imports, sniffer logic,
       `infracost/cloudformation` assertions).
-- [ ] **Decision to record:** SDK `example/` vs a `template/` copy — link to
-      `../parser/plugin/template/` as canonical and keep only a minimal `example/`
-      (avoid shipping two divergent starters). Docs get a single "start here" pointer;
-      carry a "sourced from parser@<ref>" note if any template snapshot is shipped.
+- [x] **Decision (user, 2026-07-31):** this repo's `parser/template/` is the
+      **canonical** template source; `../parser/plugin/template/` becomes a downstream
+      copy (repointing it is a follow-up in that repo). Keep `example/` as the minimal
+      single-file walkthrough and `template/` as the production-shaped starter; docs get
+      a single "start here" pointer distinguishing the two. Template README must state
+      canonicity and record the ../parser ref it was last reconciled with.
 
 ### 3. Fix `parser/example/go.mod` + `Makefile`
 - [ ] **go.mod decision (record explicitly):** prefer bumping to the tagged
@@ -216,7 +282,9 @@ must also hold on the tagged release ../cli and ../parser consume, v1.159.0+).
       convention (`infracost/` reserved by convention).
 - [ ] Remove the "Validation" `plugin validate` section and the `plugin add` example;
       "Managing plugins" shows `plugin list` + `plugin update` only (note `plugin update`
-      errors when `INFRACOST_CLI_PLUGIN_DIR` is set).
+      errors when `INFRACOST_CLI_PLUGIN_DIR` is set). A short labeled future-work note
+      may mention that `plugin validate`/`plugin add` are planned (CLI issues **cli-b10**
+      and **cli-6f8**) — never present them as existing.
 - [ ] Keep two-plugin framing + links to `parser/` and `provider/` docs (each must exist).
 - [ ] Provider-specific SPEC/README/example fixes remain a **provider-worktree
       follow-up**; the root README provider row and shared handshake are corrected here.
@@ -235,8 +303,9 @@ must also hold on the tagged release ../cli and ../parser consume, v1.159.0+).
       `ListSupportedResources`, `SupportedResources`, `kubernetes_supported_resources`,
       `file_extensions`, `supports_directories`, `plugins.infracost.io`,
       `INFRACOST_PARSER_PLUGIN_MAGIC_COOKIE`, `INFRACOST_PROVIDER_PLUGIN_MAGIC_COOKIE`,
-      `ac92b06c592f`, `04d179d767fc`, `plugin validate`, `plugin add`, `--fixture`,
-      `-debug`, `raw_options_format`, `cmd/infracost-parser-plugin`.
+      `ac92b06c592f`, `04d179d767fc`, `--fixture`, `-debug`, `raw_options_format`,
+      `cmd/infracost-parser-plugin`. For `plugin validate`/`plugin add`: no occurrences
+      outside a clearly-labeled future-work note citing cli-b10/cli-6f8.
 - [ ] Confirm no README/SPEC contradictions (naming, cookie, RPC set, priority values).
 
 ## Verification Baseline (verified 2026-07-31 against local sibling checkouts)
@@ -262,5 +331,6 @@ must also hold on the tagged release ../cli and ../parser consume, v1.159.0+).
    release publishes the `infracost.plugin` package and resolves from a fresh clone with
    no siblings. The relative-`replace` fallback is therefore NOT needed; drop the current
    broken `../../../proto` replace entirely.
-2. **example vs template/** (Task 2): recommend link-to-canonical-template + minimal
-   example; confirm before shipping any snapshot.
+2. **example vs template/** (Task 2): **RESOLVED (user, 2026-07-31)** — this repo hosts
+   the canonical `parser/template/`; keep the minimal `example/` alongside it. See the
+   Task 2 decision bullet and the template-alignment spec.

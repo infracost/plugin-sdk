@@ -1,15 +1,15 @@
 # Parser Example Accuracy
 
 ## Overview
-`parser/example/` must be a compiling, minimal parser plugin implementing the live `infracost.plugin` contract. Today it implements the abandoned `Describe`/`Detect` API and fails to build against the current proto module.
+`parser/example/` must be a compiling, minimal parser plugin implementing the live `infracost.plugin` contract. The rebased base already implements `GetPluginInfo`/`GetParserConfig`/`IdentifyProjects`/`Parse` with the shared handshake; the remaining gaps are the go.mod pin (`v1.34.0` + broken `replace`), the missing `IdentifyEnvironments` mention, and test coverage.
 
 ## Requirements
 - The example implements `PluginService.GetPluginInfo` (returning `type: PARSER`) and `ParserService.GetParserConfig`, `IdentifyProjects`, and `Parse`, registered together on one gRPC server behind the shared handshake.
 - `Parse` returns a small but real `tree.Tree` (at least one provider → service → resource) so authors see the actual output shape instead of a format-specific oneof.
 - `IdentifyEnvironments` is either implemented trivially or explicitly omitted with a comment stating that returning `codes.Unimplemented` is valid (mirroring the proto contract).
-- `go.mod` builds against a **tagged** `github.com/infracost/proto` release that contains the `infracost.plugin` package (the version ../parser pins, v1.159.0+), with no `replace` directive; if a replace is temporarily unavoidable it must carry an accurate comment and a path that works from a fresh clone (the current `../../../proto` breaks in any non-sibling checkout).
+- `go.mod` builds against the tagged `github.com/infracost/proto` release ../parser pins (v1.160.0 — verified to publish the `infracost.plugin` package), with the `replace` directive removed entirely.
 - The Makefile's targets must all succeed: `build`, a `test` target, and (replacing the dead `validate` target) an install-to-plugin-dir target or documented manual verification step.
-- Example code style should mirror the structure of `../parser/plugin/template/` (main.go + server package, one file per RPC, table-driven tests) so authors graduating to the template aren't relearning a layout — see the template-alignment spec.
+- Example code style should be consistent with this repo's canonical `parser/template/` (see template-alignment spec) so authors graduating from example to template aren't relearning a layout; the example may stay single-file for readability, but names and idioms should match.
 
 ## Acceptance Criteria
 - [ ] `go build ./...` succeeds in `parser/example/` from a fresh clone with no sibling checkouts.
@@ -19,7 +19,7 @@
 - [ ] A binary built from the example is loadable by the CLI (appears in `infracost plugin list` when dropped in the plugin dir), or the reason it cannot be (if any) is documented.
 
 ## Edge Cases
-- Proto tag availability: if no tagged release exposes `infracost.plugin` publicly, the requirement degrades to a replace directive with a working relative path plus a README note — this must be an explicit, recorded decision, not an accident.
+- Proto tag availability is resolved: v1.160.0 publishes `infracost.plugin` (it's what ../parser builds against). If a newer field the docs need is absent from the tag, flag it rather than reintroducing a replace directive.
 - `IdentifyProjects` mutual-exclusion rule (`directory: true` forbids `files`) should be honored in the example logic since it's the most common contract mistake.
 
 ## Dependencies
