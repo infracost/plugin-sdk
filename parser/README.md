@@ -42,7 +42,7 @@ The CLI scans `os.UserCacheDir()/infracost/plugins` (Linux `~/.cache/...`, macOS
 make install
 ```
 
-Then run `infracost` against a project containing your format.
+Then run `infracost plugin list` to confirm the binary is visible and reporting the expected name and version, then run `infracost` against a project containing your format.
 
 ## Interface contract
 

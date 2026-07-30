@@ -34,6 +34,19 @@ The plugin directory defaults to `os.UserCacheDir()/infracost/plugins`:
 
 A descriptive binary name such as `infracost-parser-<name>` or `infracost-provider-<name>` is conventional and recommended for clarity, but it is not required for discovery.
 
+Binaries that fail to launch, fail the handshake, or fail to serve `GetPluginInfo` are **skipped** — logged at debug level, not fatal. A duplicate `(name, type)` pair (two parser plugins both reporting `infracost/kubernetes`, for example) is **fatal**: the CLI kills all already-loaded plugins and exits with an error. A parser and a provider that share the same name (e.g. `infracost/kubernetes`) are different identities and are both allowed.
+
+### Environment variables
+
+Override defaults without touching config files:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `INFRACOST_CLI_PLUGIN_DIR` | *(cache directory)* | Load plugins from this flat directory instead of the cache. Downloads are skipped; useful for local development. |
+| `INFRACOST_CLI_PLUGIN_CACHE_DIRECTORY` | `os.UserCacheDir()/infracost/plugins` | Where managed (required) plugins are downloaded to. |
+| `INFRACOST_CLI_PLUGIN_BASE_URL` | `https://releases.infracost.io` | Root URL for plugin archive downloads. |
+| `INFRACOST_CLI_PLUGIN_AUTO_UPDATE` | `true` | Set to `false` to disable automatic updates of required plugins. |
+
 ## Plugin naming
 
 The `name` returned by `GetPluginInfo` is the plugin's identity, by convention `<namespace>/<name>`:
@@ -43,7 +56,7 @@ The `name` returned by `GetPluginInfo` is the plugin's identity, by convention `
 | `infracost/terraform` | Official plugin (the `infracost/` namespace is reserved for official plugins) |
 | `acme/crossplane` | Community plugin |
 
-Names must be unique across all installed plugins.
+Names must be unique **within a type** — a parser and a provider may report the same name (e.g. `infracost/kubernetes`) without conflict.
 
 ## The handshake
 
@@ -70,3 +83,22 @@ make install
 ```
 
 Then run `infracost` against a project — the CLI launches the binary, calls `GetPluginInfo`, and routes work to it based on the reported type.
+
+## Managing plugins
+
+```bash
+infracost plugin list    # show installed plugins and their versions
+infracost plugin update  # download the latest versions of all required plugins
+```
+
+Use `infracost plugin list` to confirm a newly installed binary is visible to the CLI and showing the expected name/version. If a binary does not appear in the list, it failed discovery — see [Diagnosing discovery failures](#diagnosing-discovery-failures) below.
+
+## Diagnosing discovery failures
+
+If a plugin binary is not listed by `infracost plugin list`, one of the following is likely:
+
+- **Not executable** — run `chmod +x <binary>` (Linux/macOS).
+- **Handshake failed** — the binary started but used wrong cookie/protocol values. Check the handshake constants in your `main.go`.
+- **Timed out at startup** — plugins have 60 s (Linux/macOS) or 180 s (Windows) to become ready. A slow binary or missing dependency can exceed this limit.
+
+Re-run with `--log-level debug` (or set `LOG_LEVEL=debug`) to see per-binary skip reasons. The CLI propagates `LOG_LEVEL` to the plugin subprocess, so your plugin's own `LOG_LEVEL`-aware logger will emit debug output at the same level.
