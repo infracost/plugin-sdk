@@ -1,2 +1,8 @@
-infracost-parser-plugin-*
-infracost-provider-plugin-*
+infracost-parser-*
+infracost-provider-*
+
+# `go build ./...` run without -o from a module root drops a binary named
+# after the directory; ignore those default names too.
+/parser/example/example
+/parser/template/template
+/provider/example/example

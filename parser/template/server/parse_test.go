@@ -17,8 +17,6 @@ import (
 )
 
 func TestParse(t *testing.T) {
-	t.Skip("template plugin — replace when implementing a real plugin")
-
 	entries, err := os.ReadDir("testdata")
 	if err != nil {
 		t.Fatalf("read testdata: %v", err)
@@ -82,17 +80,16 @@ func loadRequest(t *testing.T, dir string) *pluginpb.ParseRequest {
 	}
 
 	var rawOptions []byte
-	if data, err := os.ReadFile(filepath.Join(dir, "cloudformation.options.json")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(dir, "template.options.json")); err == nil {
 		rawOptions = data
 	} else if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("read cloudformation.options.json: %v", err)
+		t.Fatalf("read template.options.json: %v", err)
 	}
 
 	return &pluginpb.ParseRequest{
-		Path:             filepath.Join(dir, "template.yml"),
-		GenericOptions:   &generic,
-		RawOptions:       rawOptions,
-		RawOptionsFormat: "application/json",
+		Path:           filepath.Join(dir, projectMarkerFile),
+		GenericOptions: &generic,
+		RawOptions:     rawOptions,
 	}
 }
 

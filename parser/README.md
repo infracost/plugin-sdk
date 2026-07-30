@@ -10,7 +10,18 @@ The CLI discovers plugins by launching every binary in its plugin directory and 
 
 ## Quick start
 
-1. Copy the [`example/`](example) directory as your starting point
+This SDK ships two starting points — pick one:
+
+- **[`example/`](example)** — a single self-contained `main.go`. Read this
+  first to see the whole contract (handshake, both services, all four RPCs)
+  in one file with no package split.
+- **[`template/`](template)** — the production-shaped starting point, split
+  one file per RPC (`server/get_plugin_info.go`, `server/parse.go`, etc.) with
+  its own tests and `testdata/` fixtures. Copy this when you're ready to build
+  a real plugin.
+
+1. Copy [`template/`](template) (or [`example/`](example) for something
+   smaller) as your starting point
 2. Update `GetPluginInfo()` with your plugin's name and metadata
 3. Implement `IdentifyProjects()` to recognise your IaC files in a directory
 4. Implement `Parse()` to extract resources into a `tree.Tree`
@@ -56,7 +67,7 @@ Both services are registered on the same gRPC server using a shared handshake. S
 
 ## Testing
 
-The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that call your service methods directly with `testdata/` fixtures. The reference plugins in the [infracost/parser](https://github.com/infracost/parser) repo follow this pattern (`server/*_test.go`).
+The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that call your service methods directly with `testdata/` fixtures. [`template/`](template) shows the pattern (`server/*_test.go`, in-process via go-plugin's `TestPluginGRPCConn`); the reference plugins in the [infracost/parser](https://github.com/infracost/parser) repo follow the same pattern.
 
 To try it end to end, install the binary in the plugin directory (`make install`) and run `infracost` against a project.
 
@@ -67,5 +78,6 @@ Most formats can pass their format-specific options as JSON via `ParseRequest.ra
 ## Reference
 
 - [SPEC.md](SPEC.md) — Full plugin interface specification
-- [example/](example) — Minimal working plugin
+- [example/](example) — Minimal working plugin (single file)
+- [template/](template) — Production-shaped starting point (one file per RPC, with tests)
 - [infracost/parser](https://github.com/infracost/parser) — Production plugin implementations
