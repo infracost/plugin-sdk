@@ -1,14 +1,14 @@
 # Provider Example Accuracy
 
 ## Overview
-`provider/example/` must be a compiling, minimal provider plugin implementing the live `infracost.plugin` contract. Today it implements nonexistent RPCs (`Describe`, `ListSupportedResources`, `ProcessTree`) and fails to build against the current proto module.
+`provider/example/` must be a compiling, minimal provider plugin implementing the live `infracost.plugin` contract. The rebased base already implements `GetPluginInfo`/`Process`/`ListFinopsPolicies` with the shared handshake; the remaining gaps are the go.mod pin (`v1.34.0` + broken `replace`) and test coverage.
 
 ## Requirements
 - The example implements `PluginService.GetPluginInfo` (returning `type: PROVIDER`) and `ProviderService.Process` + `ListFinopsPolicies`, registered together on one gRPC server behind the shared handshake.
 - `Process` walks `input.tree` (providers → services → resources) and returns a hardcoded-price `Output` for a recognizable resource type, demonstrating: `ResourceCosts.components`, `PeriodPrice` with `Rat` math, `quantity`, and `price_was_hardcoded`.
 - `ListFinopsPolicies` returns an empty list with a comment showing the five `FinopsPolicy` fields for authors who want policies.
 - No `ListSupportedResources`, no `SupportedResources` imports from `infracost/parser/api`, no `ProcessTree`.
-- `go.mod` builds against a tagged `github.com/infracost/proto` release (same constraints and fallback rules as the parser example spec).
+- `go.mod` builds against the tagged `github.com/infracost/proto` v1.160.0 release with the `replace` directive removed (same resolution as the parser example spec).
 - Makefile targets all succeed; the dead `validate` target is replaced per the CLI-commands spec.
 - Since ../providers has no template/skeleton, this example is the de-facto template for community providers — it should include at least one unit test demonstrating how to build a `TreeInput` and assert on `Output`, mirroring the test style used in ../providers.
 
