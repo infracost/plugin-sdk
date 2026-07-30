@@ -16,7 +16,7 @@ The top-level `README.md` is the SDK's front door. Its comparison table, naming 
 ## Acceptance Criteria
 - [ ] Every command shown in the root README executes successfully against the current CLI (or is clearly marked as sample output).
 - [ ] Table values are consistent with both SPECs (no README/SPEC contradictions).
-- [ ] No references to magic-cookie values, registries, or validation tooling that don't exist.
+- [ ] No references to magic-cookie values or registries that don't exist; `plugin validate`/`plugin add` appear only as a labeled future-work note citing CLI issues `cli-b10`/`cli-6f8`, if at all.
 
 ## Edge Cases
 - The README should not enumerate proto field details (it will drift); it should link to the SPECs for anything below RPC level.
