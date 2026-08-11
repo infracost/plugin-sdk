@@ -253,7 +253,7 @@ To add support for a completely new IaC format:
 
 3. **Install** the binary in the plugin directory (see [Installing and testing](#installing-and-testing)).
 
-For official plugins maintained in the `infracost/parser` repo, also wire the new plugin into the build/release manifest. Community plugins need only be discoverable in the plugin directory.
+No registration with Infracost is required — a plugin only needs to be discoverable in the plugin directory.
 
 ## Installing and testing
 
@@ -275,7 +275,7 @@ Run `infracost plugin list` to verify the binary is visible and reporting the ex
 | `INFRACOST_CLI_PLUGIN_CACHE_DIRECTORY` | `os.UserCacheDir()/infracost/plugins` | Download location for managed plugins. |
 | `INFRACOST_CLI_PLUGIN_AUTO_UPDATE` | `true` | Set to `false` to disable automatic updates. |
 
-Because the gRPC contract is plain Go, the most reliable way to test a plugin is with Go unit tests that call your service methods directly — see [`template/server/*_test.go`](template/server) in this repo, or the equivalent files alongside each reference plugin in the `infracost/parser` repo, for the pattern (table-driven tests with `testdata/` fixtures).
+Because the gRPC contract is plain Go, the most reliable way to test a plugin is with Go unit tests that call your service methods directly — see [`template/server/*_test.go`](template/server) in this repo for the pattern (table-driven tests with `testdata/` fixtures).
 
 ## Constraints and Limits
 
@@ -292,12 +292,9 @@ If `infracost plugin list` doesn't show your binary, re-run infracost with `--lo
 
 ## Reference Implementations
 
-See the per-IaC parser plugins in the `infracost/parser` repo for production examples (each is a `main.go` plus a `server/` package with one file per RPC):
-- `plugin/terraform/` — directory-based, identifies whole directories
-- `plugin/terragrunt/` — directory-based, higher identification priority than Terraform
-- `plugin/cloudformation/` — file-based, content-sniffs `.json`/`.yaml`/`.yml`
-- `plugin/kubernetes/` — file-based, identifies Kubernetes manifests
-- `plugin/ciscostacks/` — file-based, identifies Cisco Stacks templates
-- `plugin/terraform-plan/` — file-based, identification priority 10 (always wins over Terraform)
-
 For a minimal, single-file starting point, see [`example/`](example) in this repo. For a production-shaped starting point (one file per RPC, with tests), see [`template/`](template) — copy it directly to start a real plugin.
+
+The official Infracost parser plugins follow the same shape as `template/` (a `main.go` plus a `server/` package with one file per RPC). Their identification behaviour, observable via `infracost plugin list` and a `--log-level debug` run, is a useful calibration point for your own:
+- **Terraform** and **Terragrunt** are directory-based: they claim whole directories.
+- **CloudFormation**, **Kubernetes**, **CiscoStacks**, and **ARM** are file-based: they content-sniff individual files.
+- **Terragrunt** registers identification priority 1 (above Terraform's 0); **Terraform-plan** registers 10, so a plan file always wins over the Terraform directory containing it. All others use the default 0.

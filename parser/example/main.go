@@ -100,7 +100,10 @@ func (s *exampleService) GetParserConfig(_ context.Context, _ *pluginpb.GetParse
 }
 
 // IdentifyProjects (ParserService) inspects a single directory (it must NOT
-// recurse) and reports which paths this plugin can parse.
+// recurse) and reports which paths this plugin can parse. It runs for every
+// directory of a repo, so keep it cheap: reject files by extension (as here)
+// and, if your format shares an extension with others (e.g. .json), a byte
+// scan for a distinctive marker before paying for a full decode.
 func (s *exampleService) IdentifyProjects(_ context.Context, req *pluginpb.IdentifyProjectsRequest) (*pluginpb.IdentifyProjectsResponse, error) {
 	entries, err := os.ReadDir(req.GetDirectory())
 	if err != nil {
