@@ -1,7 +1,6 @@
 // Package server implements the gRPC services this plugin exposes:
 // PluginService (identity) and ParserService (parsing). Each RPC lives in its
-// own file below, mirroring the layout of the reference plugins in the
-// infracost/parser repo.
+// own file below, the same layout the official Infracost parser plugins use.
 package server
 
 import (

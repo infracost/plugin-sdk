@@ -12,6 +12,10 @@ import (
 // (the same pattern Terraform uses for *.tf files, one level up). Replace this
 // with your format's real detection.
 //
+// Keep identification cheap: it runs for every directory of a repo, so reject
+// files by extension and a byte scan for a distinctive marker before paying
+// for a full decode.
+//
 // This demonstrates the directory:true branch of IdentifyProjectsResponse. If
 // your format identifies individual files rather than whole directories (like
 // CloudFormation or the file-based ../../example), populate Files instead —

@@ -44,10 +44,6 @@ real plugin; use `example/` to learn the contract first.
 ## Canonical source
 
 This repo (`parser-plugin-sdk`) is the canonical home of this template.
-`infracost/parser`'s `plugin/template` is a downstream copy; this copy was
-last reconciled against `infracost/parser` `main` @ `c533a18` (2026-07-31).
-Repointing that copy back at this repo is a follow-up tracked in the
-`infracost/parser` repo, not done here.
 
 ## The RPCs
 
@@ -56,7 +52,7 @@ Repointing that copy back at this repo is a follow-up tracked in the
 | `GetPluginInfo` | Identity: name, version, description, URL, author, type (`PARSER`). |
 | `GetParserConfig` | `identification_priority` (higher wins for the same files) and the optional `config_file_project_type`. |
 | `IdentifyProjects` | Given a directory (non-recursive), report whether the whole dir is one project, and/or which files are projects. |
-| `IdentifyEnvironments` *(optional)* | Refine an identified project into named environments. Not implemented here — `Server` embeds `pluginpb.UnimplementedParserServiceServer`, so this RPC correctly returns `codes.Unimplemented`, which the CLI treats as "this plugin has no environment concept" (distinct from returning an empty list). Implement it if your format has an equivalent of Terraform workspaces or var-file sets; see the `infracost/parser` repo's `kubernetes`/`terraform` plugins for real implementations. |
+| `IdentifyEnvironments` *(optional)* | Refine an identified project into named environments. Not implemented here — `Server` embeds `pluginpb.UnimplementedParserServiceServer`, so this RPC correctly returns `codes.Unimplemented`, which the CLI treats as "this plugin has no environment concept" (distinct from returning an empty list). Implement it if your format has an equivalent of Terraform workspaces or var-file sets. |
 | `Parse` | Turn an identified path into an IaC-agnostic `tree.Tree`. |
 
 `identify_projects.go` demonstrates the `directory: true` branch (a marker

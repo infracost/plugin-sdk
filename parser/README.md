@@ -67,7 +67,7 @@ Both services are registered on the same gRPC server using a shared handshake. S
 
 ## Testing
 
-The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that call your service methods directly with `testdata/` fixtures. [`template/`](template) shows the pattern (`server/*_test.go`, in-process via go-plugin's `TestPluginGRPCConn`); the reference plugins in the [infracost/parser](https://github.com/infracost/parser) repo follow the same pattern.
+The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that call your service methods directly with `testdata/` fixtures. [`template/`](template) shows the pattern (`server/*_test.go`, in-process via go-plugin's `TestPluginGRPCConn`).
 
 To try it end to end, install the binary in the plugin directory (`make install`) and run `infracost` against a project.
 
@@ -80,4 +80,3 @@ Most formats can pass their format-specific options as JSON via `ParseRequest.ra
 - [SPEC.md](SPEC.md) — Full plugin interface specification
 - [example/](example) — Minimal working plugin (single file)
 - [template/](template) — Production-shaped starting point (one file per RPC, with tests)
-- [infracost/parser](https://github.com/infracost/parser) — Production plugin implementations

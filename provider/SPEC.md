@@ -282,7 +282,7 @@ The CLI discovers plugins by scanning a plugin directory, which defaults to `os.
 
 Drop your built binary in that directory and run `infracost` against a project. The CLI will launch the binary, call `GetPluginInfo`, and route the cost tree to it if it reports `type: PROVIDER`.
 
-Because the gRPC contract is plain Go, the most reliable way to test a provider is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly. See the tests in the `infracost/providers` repo for the pattern.
+Because the gRPC contract is plain Go, the most reliable way to test a provider is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly.
 
 ## Constraints and Limits
 
@@ -292,7 +292,6 @@ Because the gRPC contract is plain Go, the most reliable way to test a provider 
 
 ## Reference Implementations
 
-See the official Infracost provider plugins in the `infracost/providers` repo:
-- `plugin/aws/`, `plugin/azure/`, `plugin/google/` — per-cloud binaries built on a shared `internal/plugin` server, each scoped to one cloud's pricing and policies.
-
 For a minimal starting point, see the [`example/`](example) directory in this repo.
+
+The official Infracost provider plugins (AWS, Azure, Google, Kubernetes) follow this same contract as separate per-cloud binaries, each scoped to one cloud's pricing and policies.
