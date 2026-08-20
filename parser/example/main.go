@@ -1,7 +1,7 @@
-// infracost-parser-plugin-example is a minimal parser plugin that demonstrates
-// the full plugin interface contract. It identifies ".example" files in a
-// directory and returns an empty cost tree for each one. Use this as a starting
-// point for new parser plugins.
+// infracost-parser-example is a minimal parser plugin that demonstrates the full
+// plugin interface contract. It identifies ".example" files in a directory and
+// returns a minimal cost tree for each one. Use this as a starting point for new
+// parser plugins.
 package main
 
 import (
@@ -63,7 +63,7 @@ func (p *examplePlugin) GRPCServer(_ *goplugin.GRPCBroker, g *grpc.Server) error
 	return nil
 }
 
-func (p *examplePlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (interface{}, error) {
+func (p *examplePlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (any, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -100,7 +100,10 @@ func (s *exampleService) GetParserConfig(_ context.Context, _ *pluginpb.GetParse
 }
 
 // IdentifyProjects (ParserService) inspects a single directory (it must NOT
-// recurse) and reports which paths this plugin can parse.
+// recurse) and reports which paths this plugin can parse. It runs for every
+// directory of a repo, so keep it cheap: reject files by extension (as here)
+// and, if your format shares an extension with others (e.g. .json), a byte
+// scan for a distinctive marker before paying for a full decode.
 func (s *exampleService) IdentifyProjects(_ context.Context, req *pluginpb.IdentifyProjectsRequest) (*pluginpb.IdentifyProjectsResponse, error) {
 	entries, err := os.ReadDir(req.GetDirectory())
 	if err != nil {
@@ -126,17 +129,32 @@ func (s *exampleService) IdentifyProjects(_ context.Context, req *pluginpb.Ident
 
 // Parse (ParserService) reads the IaC at req.Path and returns an IaC-agnostic
 // cost tree. A real plugin would build the tree from the parsed resources; this
-// example returns an empty tree.
+// example returns a single placeholder resource.
 func (s *exampleService) Parse(_ context.Context, req *pluginpb.ParseRequest) (*pluginpb.ParseResponse, error) {
 	if req.GetPath() == "" {
 		return nil, fmt.Errorf("path is required")
 	}
 
 	// req.GenericOptions carries IaC-agnostic settings (working directory,
-	// dependency requests, etc.). Plugin-specific options arrive as raw bytes
-	// in req.RawOptions, encoded as req.RawOptionsFormat (e.g. "application/json").
+	// dependency requests, etc.). Plugin-specific options arrive as JSON bytes
+	// in req.RawOptions (always JSON; proto field 4 is reserved and dropped).
 
 	return &pluginpb.ParseResponse{
-		Tree: &tree.Tree{},
+		Tree: &tree.Tree{
+			Providers: map[string]*tree.Provider{
+				"example": {
+					Services: map[string]*tree.Service{
+						"example": {
+							Resources: []*tree.Resource{
+								{
+									Id:   req.GetPath(),
+									Type: "example_resource",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}, nil
 }

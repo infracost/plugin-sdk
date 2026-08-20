@@ -1,1 +1,18 @@
-{}
+{
+  "tree": {
+    "providers": {
+      "template": {
+        "services": {
+          "template": {
+            "resources": [
+              {
+                "id": "testdata/basic/template.config.json",
+                "type": "template_resource"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

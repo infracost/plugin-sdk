@@ -54,7 +54,7 @@ Both services are registered on the same gRPC server using a shared handshake. S
 
 ## Testing
 
-The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly. The reference plugins in the [infracost/providers](https://github.com/infracost/providers) repo follow this pattern.
+The plugin contract is plain Go gRPC, so the most reliable way to test is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly.
 
 To try it end to end, install the binary in the plugin directory (`make install`) and run `infracost` against a project.
 
@@ -62,4 +62,3 @@ To try it end to end, install the binary in the plugin directory (`make install`
 
 - [SPEC.md](SPEC.md) — Full plugin interface specification
 - [example/](example) — Minimal working plugin with hardcoded pricing
-- [infracost/providers](https://github.com/infracost/providers) — Production provider implementations

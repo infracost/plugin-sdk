@@ -143,24 +143,10 @@ The `TreeInput` message (`infracost/provider/tree.proto`) includes:
 | `features` | Features | Feature flags (price lookups, recommendations, policies, environmental metrics). |
 | `settings` | Settings | Currency code, disk cache preferences. |
 | `infracost` | Infracost | Infracost-specific credentials (API key, pricing endpoint, trace/org IDs). Community providers should ignore these. |
-| `raw_options` | bytes | Provider-specific options, encoded however your plugin chooses (mirrors the parser's `ParseRequest.raw_options`). |
-| `raw_options_format` | string | The encoding of `raw_options`, e.g. `"application/json"`. Document the format your plugin expects. |
 
-#### Provider options
-
-Like parser plugins, a provider plugin can take its own options. The CLI builds
-them per provider plugin (keyed by the plugin's `GetPluginInfo` name), JSON-
-marshals a typed struct, and sends it on `TreeInput.raw_options` with
-`raw_options_format = "application/json"`; `Process` decodes the bytes into its
-own struct. This is the generic, IaC-agnostic way to pass plugin-specific
-configuration — prefer it over out-of-band channels (env vars, files).
-
-Worked example — the **kubernetes** provider: Kubernetes manifests carry no
-cluster topology (node pools, regions), so the CLI resolves a cluster spec (e.g.
-from `--kubernetes-cluster-from`), JSON-encodes it, and sends it on
-`raw_options`. The provider decodes it and prices pod requests against the
-cluster's node pools. No Kubernetes-specific field was added to the shared
-contract.
+Unlike parser plugins, `TreeInput` has no generic options channel — a provider
+plugin that needs its own configuration must use an out-of-band mechanism
+(env vars, files, or flags).
 
 **Response:**
 
@@ -282,7 +268,7 @@ The CLI discovers plugins by scanning a plugin directory, which defaults to `os.
 
 Drop your built binary in that directory and run `infracost` against a project. The CLI will launch the binary, call `GetPluginInfo`, and route the cost tree to it if it reports `type: PROVIDER`.
 
-Because the gRPC contract is plain Go, the most reliable way to test a provider is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly. See the tests in the `infracost/providers` repo for the pattern.
+Because the gRPC contract is plain Go, the most reliable way to test a provider is with Go unit tests that build a `TreeInput` and call `Process` / `ListFinopsPolicies` directly.
 
 ## Constraints and Limits
 
@@ -292,7 +278,6 @@ Because the gRPC contract is plain Go, the most reliable way to test a provider 
 
 ## Reference Implementations
 
-See the official Infracost provider plugins in the `infracost/providers` repo:
-- `plugin/aws/`, `plugin/azure/`, `plugin/google/` — per-cloud binaries built on a shared `internal/plugin` server, each scoped to one cloud's pricing and policies.
-
 For a minimal starting point, see the [`example/`](example) directory in this repo.
+
+The official Infracost provider plugins (AWS, Azure, Google, Kubernetes) follow this same contract as separate per-cloud binaries, each scoped to one cloud's pricing and policies.
