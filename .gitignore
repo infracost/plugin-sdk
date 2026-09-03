@@ -3,6 +3,7 @@ infracost-provider-*
 
 # Internal tooling state — never publish.
 .synapse/
+.worktrees/
 CLAUDE.local.md
 
 # `go build ./...` run without -o from a module root drops a binary named
